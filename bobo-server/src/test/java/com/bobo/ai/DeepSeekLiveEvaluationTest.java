@@ -6,6 +6,7 @@ import com.bobo.domain.entity.Category;
 import com.bobo.domain.entity.Item;
 import com.bobo.domain.vo.AiVos;
 import com.bobo.mapper.AiCallLogMapper;
+import com.bobo.mapper.AiSettingMapper;
 import com.bobo.mapper.CategoryMapper;
 import com.bobo.mapper.ItemMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -142,10 +143,18 @@ class DeepSeekLiveEvaluationTest {
         contextService = new AiItemContextService(categoryMapper, itemMapper);
 
         integration = buildIntegration();
-        AiAvailability availability = new AiAvailability(properties, integration);
+        // 配置源：配置表查询返回 null → 全部回落环境变量/yml（本测试就是要测真实 Key 的调用链路）
+        AiSettingMapper settingMapper = mock(AiSettingMapper.class);
+        when(settingMapper.selectById(anyLong())).thenReturn(null);
+        AiSettingsProvider settingsProvider = new AiSettingsProvider(properties, settingMapper);
+        AiChatConfig.DynamicChatInvoker dynamicInvoker =
+                new AiChatConfig.DynamicChatInvoker(settingsProvider);
+        dynamicInvoker.setDelegateForTest(integration);
+
+        AiAvailability availability = new AiAvailability(settingsProvider, dynamicInvoker);
         AiCallRecorder recorder = new AiCallRecorder(
-                new AiCallLogWriter(callLogMapper, properties), properties, integration);
-        executor = new AiExecutor(properties, availability, new AiRateLimiter(properties),
+                new AiCallLogWriter(callLogMapper, settingsProvider), settingsProvider, integration);
+        executor = new AiExecutor(settingsProvider, availability, new AiRateLimiter(settingsProvider),
                 recorder, integration, callLogMapper);
         heuristic = new AiHeuristicParser();
     }

@@ -169,4 +169,59 @@ public final class AiVos {
         private Long logId;
         private long latencyMs;
     }
+
+    /**
+     * AI 模型配置（后台配置页回显）。
+     *
+     * <p><b>安全约定：这里永远不返回 API Key 明文。</b>
+     * 只给 {@code apiKeyMasked}（形如 {@code sk-abc****07e}）与
+     * {@code apiKeyConfigured}（是否已配置）。前端据此渲染「留空即不修改」的密码框。
+     */
+    @Data
+    public static class AiSettingsVO {
+        /** 总开关 */
+        private boolean enabled;
+
+        /** 已配置时返回脱敏值，未配置返回空串 */
+        private String apiKeyMasked;
+        /** 是否已配置 Key（前端用它决定 placeholder 文案） */
+        private boolean apiKeyConfigured;
+
+        private String baseUrl;
+        private String model;
+        private long timeoutMs;
+        private int maxAttempts;
+        private double temperature;
+        private int globalQps;
+        private int userQps;
+        private int dailyQuota;
+        private BigDecimal priceInput;
+        private BigDecimal priceOutput;
+
+        /** 最后修改时间 */
+        private String updateTime;
+
+        /** 当前是否可用 / 是否降级，以及原因 */
+        private boolean available;
+        private boolean degraded;
+        private String degradeReason;
+        /** 配置表不可用（未执行 05-ai-setting.sql）时的提示 */
+        private String storageWarning;
+        /** 按当前配置构建客户端失败的原因 */
+        private String clientError;
+    }
+
+    /** 连通性测试结果 */
+    @Data
+    public static class AiTestResultVO {
+        private boolean success;
+        private String message;
+        /** 使用的模型名 */
+        private String model;
+        private long latencyMs;
+        /** 模型回复片段（截断），证明真的调通了而不只是配置合法 */
+        private String replyPreview;
+        private Integer promptTokens;
+        private Integer completionTokens;
+    }
 }

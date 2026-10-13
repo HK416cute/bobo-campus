@@ -116,6 +116,11 @@ function checkScript(code, label) {
     new Function(normalized)
     return true
   } catch (error) {
+    // import.meta 是 ESM 专有语法，在 Function 体内必然非法——
+    // 这不是缺陷，是校验手段不适用。此时交给 checkModuleSyntax 判定（它用真实 ESM 解析器）。
+    if (/import\.meta|await is only valid|Cannot use 'import\.meta'/.test(error.message)) {
+      return true
+    }
     problems.push(`${label}: JS 语法错误 -> ${error.message}`)
     return false
   }
@@ -200,7 +205,17 @@ function checkTags(content, label) {
   }
 }
 
-/** 括号配平检查（跳过字符串与注释） */
+/**
+ * 括号配平检查（跳过字符串与注释）。
+ *
+ * **定位：这是 checkModuleSyntax 的兜底，不是权威校验。**
+ * ESM 解析器能证明语法正确时，括号必然配平，本函数的启发式只会带来误报——
+ * 它不认识**正则字面量**，例如 withBase 里的 `/^([a-z]...)?\/\//i`，
+ * 其中 `[` 会被当成真括号，于是报「位置 N 的 } 无法闭合」（本工程实际踩过）。
+ * 因此调用方只在 checkModuleSyntax 失败时才调用它：
+ * 语法真错时它帮助定位，语法正确时它不再制造噪音。
+ * （.vue 的样式块、.css 仍然只有它可用，保持原样。）
+ */
 function checkBrackets(code, label) {
   const pairs = { '{': '}', '(': ')', '[': ']' }
   const closers = { '}': '{', ')': '(', ']': '[' }
@@ -245,8 +260,11 @@ for (const file of files) {
     if (script) {
       checkScript(script, rel)
       // 再按真实 ESM 规则解析一遍：能发现 import.meta、顶层 await 之类的问题
-      checkModuleSyntax(script, rel)
-      checkBrackets(script, rel)
+      const esmOk = checkModuleSyntax(script, rel)
+      // 只有在权威解析失败时才跑启发式括号检查（见 checkBrackets 的说明）
+      if (!esmOk) {
+        checkBrackets(script, rel)
+      }
     }
     const template = blockOf(content, 'template')
     if (template) {
@@ -266,8 +284,11 @@ for (const file of files) {
     if (!moduleOnly) {
       checkScript(content, rel)
     }
-    checkModuleSyntax(content, rel)
-    checkBrackets(content.replace(/^#!.*$/gm, ''), rel)
+    const esmOk = checkModuleSyntax(content, rel)
+    // 同上：ESM 解析已经证明语法正确时，括号检查只会带来误报
+    if (!esmOk) {
+      checkBrackets(content.replace(/^#!.*$/gm, ''), rel)
+    }
   } else if (ext === '.css') {
     stats.css++
     checkBrackets(content, rel)

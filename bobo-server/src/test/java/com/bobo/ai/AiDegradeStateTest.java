@@ -7,6 +7,7 @@ import com.bobo.domain.entity.Category;
 import com.bobo.domain.entity.Item;
 import com.bobo.domain.vo.AiVos;
 import com.bobo.mapper.AiCallLogMapper;
+import com.bobo.mapper.AiSettingMapper;
 import com.bobo.mapper.CategoryMapper;
 import com.bobo.mapper.ItemMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -97,22 +98,54 @@ class AiDegradeStateTest {
         return new AiItemContextService(categoryMapper, itemMapper);
     }
 
+    /**
+     * 配置源：配置表查询返回 null，所有值回落 {@link AiProperties}，
+     * 等价于"管理员还没进过后台配置页"的部署形态（配置合并逻辑另有单测覆盖）。
+     *
+     * <p><b>一个测试内必须共享同一实例</b>：provider 缓存快照，
+     * 若门控与执行器各拿一个新实例，改配置后会读不到（假故障）。生产里它是单例。
+     */
+    private AiSettingsProvider sharedProvider;
+
+    private AiSettingsProvider provider() {
+        if (sharedProvider == null) {
+            AiSettingMapper settingMapper = mock(AiSettingMapper.class);
+            when(settingMapper.selectById(anyLong())).thenReturn(null);
+            sharedProvider = new AiSettingsProvider(properties, settingMapper);
+        }
+        return sharedProvider;
+    }
+
+    /** 改了 properties 之后同步快照（等价于生产里保存配置后的 reload） */
+    private void reloadProvider() {
+        provider().reload();
+    }
+
+    /** 门控用的动态调用器：用注入点塞入替身，避免真建 Spring AI 客户端 */
+    private AiChatConfig.DynamicChatInvoker dynamicInvoker(ChatInvoker chatInvoker) {
+        AiChatConfig.DynamicChatInvoker dynamic =
+                new AiChatConfig.DynamicChatInvoker(provider());
+        dynamic.setDelegateForTest(chatInvoker);
+        return dynamic;
+    }
+
+    private AiExecutor executorFor(ChatInvoker chatInvoker) {
+        AiSettingsProvider provider = provider();
+        return new AiExecutor(provider,
+                new AiAvailability(provider, dynamicInvoker(chatInvoker)),
+                new AiRateLimiter(provider),
+                new AiCallRecorder(new AiCallLogWriter(callLogMapper, provider), provider, chatInvoker),
+                chatInvoker, callLogMapper);
+    }
+
     private AiPublishService publishService(ChatInvoker chatInvoker) {
-        AiAvailability availability = new AiAvailability(properties, chatInvoker);
-        AiCallRecorder recorder = new AiCallRecorder(
-                new AiCallLogWriter(callLogMapper, properties), properties, chatInvoker);
-        AiExecutor executor = new AiExecutor(properties, availability,
-                new AiRateLimiter(properties), recorder, chatInvoker, callLogMapper);
+        AiExecutor executor = executorFor(chatInvoker);
         return new AiPublishService(executor, new SafeJsonParser(new ObjectMapper()),
                 new AiKeywordRules(), contextService(), new AiHeuristicParser());
     }
 
     private AiSearchService searchService(ChatInvoker chatInvoker) {
-        AiAvailability availability = new AiAvailability(properties, chatInvoker);
-        AiCallRecorder recorder = new AiCallRecorder(
-                new AiCallLogWriter(callLogMapper, properties), properties, chatInvoker);
-        AiExecutor executor = new AiExecutor(properties, availability,
-                new AiRateLimiter(properties), recorder, chatInvoker, callLogMapper);
+        AiExecutor executor = executorFor(chatInvoker);
         return new AiSearchService(executor, new SafeJsonParser(new ObjectMapper()),
                 contextService(), new AiHeuristicParser());
     }
@@ -123,12 +156,13 @@ class AiDegradeStateTest {
     @DisplayName("状态1 未配置 api-key：不调用模型、不写流水，规则结果可用并标注降级原因")
     void state1NoApiKey() {
         properties.setApiKey("");
+        reloadProvider();
         AiPublishService service = publishService(invoker);
 
         AiVos.ItemDraftVO draft = service.generateDraft("九成新 iPad Air4 64G 含原装充电器 可小刀", null);
 
         assertThat(draft.getSource()).isEqualTo(AiExecutor.SOURCE_RULE);
-        assertThat(draft.getDegradeNote()).contains("api-key");
+        assertThat(draft.getDegradeNote()).contains("API Key");
         assertThat(draft.getTitle()).isEqualTo("九成新 iPad Air4 64G 含原装充电器 可小刀");
         assertThat(draft.getTags()).contains("可小刀", "含配件");
         // 硬约束：一次模型调用都不该发出
@@ -140,6 +174,7 @@ class AiDegradeStateTest {
     @DisplayName("状态1 未配置 key 时检索解析仍可用（价格与分类都能解析出来）")
     void state1SearchStillWorks() {
         properties.setApiKey("");
+        reloadProvider();
         AiSearchService service = searchService(invoker);
 
         AiVos.SearchSlotsVO slots = service.parse("东校区 500以内的数码产品");
@@ -325,6 +360,7 @@ class AiDegradeStateTest {
     @DisplayName("发布兜底也必须带风险标记：模型不可用时违规内容仍会被标出")
     void fallbackKeepsRiskFlags() {
         properties.setApiKey("");
+        reloadProvider();
         AiPublishService service = publishService(invoker);
 
         AiVos.ItemDraftVO draft = service.generateDraft("出售管制刀具", null);

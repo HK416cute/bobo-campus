@@ -191,5 +191,11 @@ export const adminApi = {
   aiModerationList: (params) => request.get('/api/admin/ai/moderation', params),
   aiHighRiskCount: () => request.get('/api/admin/ai/moderation/high-risk-count'),
   aiReport: (days = 7) => request.get('/api/admin/ai/report', { days }),
-  aiAsk: (question) => request.post('/api/admin/ai/ask', { question })
+  aiAsk: (question) => request.post('/api/admin/ai/ask', { question }),
+  /** 读取 AI 模型配置（Key 已脱敏，接口永不返回明文） */
+  aiGetSettings: () => request.get('/api/admin/ai/settings'),
+  /** 保存 AI 模型配置：留空字段 = 不修改；保存后立即生效，无需重启容器 */
+  aiSaveSettings: (data) => request.put('/api/admin/ai/settings', data),
+  /** 连通性测试：真发一次最小请求，验证 Key 与地址是否可用 */
+  aiTestSettings: (model) => request.post('/api/admin/ai/settings/test', { model: model || null })
 }

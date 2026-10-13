@@ -107,9 +107,33 @@ export function fromNow(value) {
   return formatTime(value).slice(0, 10)
 }
 
+/**
+ * 站点 base 路径（形如 '/' 或 '/bobo-campus/'）。
+ *
+ * 为什么要有这个函数：站点支持部署在子路径下（见 vite.config.js 的 base 说明），
+ * 而**以 / 开头的字符串在 JS 里不会自动带上 base**——
+ * `'/img/x.svg'` 永远指向站点根，部署到 /bobo-campus/ 后就变成 404。
+ * Vite 的 import.meta.env.BASE_URL 已经带了尾斜杠，所以这里只需去掉重复的那个。
+ *
+ * 用法：withBase('/img/img-default-cover.svg') → '/bobo-campus/img/img-default-cover.svg'
+ */
+export function withBase(path) {
+  if (!path) {
+    return path
+  }
+  // 已经是完整 URL（http://、//cdn、data:）时不动它
+  if (/^([a-z][a-z0-9+.-]*:)?\/\//i.test(path) || path.startsWith('data:')) {
+    return path
+  }
+  const base = import.meta.env.BASE_URL || '/'
+  const normalizedBase = base.endsWith('/') ? base.slice(0, -1) : base
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  return `${normalizedBase}${normalizedPath}`
+}
+
 /** 内置占位图与品牌图：都放在 public/ 下，构建时原样拷贝 */
-export const DEFAULT_COVER = '/img/img-default-cover.svg'
-export const LOGO = '/logo.svg'
+export const DEFAULT_COVER = withBase('/img/img-default-cover.svg')
+export const LOGO = withBase('/logo.svg')
 
 /** 商品封面兜底 */
 export function coverOf(item) {

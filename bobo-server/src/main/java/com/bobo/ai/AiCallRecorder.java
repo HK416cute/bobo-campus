@@ -1,7 +1,6 @@
 package com.bobo.ai;
 
 import com.bobo.ai.spi.ChatInvoker;
-import com.bobo.config.props.AiProperties;
 import com.bobo.domain.entity.AiCallLog;
 import com.bobo.security.AuthContext;
 import lombok.RequiredArgsConstructor;
@@ -33,7 +32,7 @@ import java.security.NoSuchAlgorithmException;
 public class AiCallRecorder {
 
     private final AiCallLogWriter writer;
-    private final AiProperties properties;
+    private final AiSettingsProvider settingsProvider;
     private final ChatInvoker chatInvoker;
 
     /**
@@ -48,6 +47,7 @@ public class AiCallRecorder {
         AiCallLog entity = writer.build(scene, status, degradeReason, errorMsg,
                 shortHash(inputRaw), shortHash(outputRaw), latencyMs,
                 promptTokens, completionTokens, chatInvoker.name(), AuthContext.userIdOrNull());
+        fillRuntimeFields(entity, promptTokens, completionTokens);
         return writer.insert(entity);
     }
 
@@ -60,16 +60,32 @@ public class AiCallRecorder {
         AiCallLog entity = writer.build(scene, status, degradeReason, errorMsg,
                 shortHash(inputRaw), shortHash(outputRaw), latencyMs,
                 promptTokens, completionTokens, chatInvoker.name(), userId);
+        fillRuntimeFields(entity, promptTokens, completionTokens);
         writer.insertAsync(entity);
     }
 
-    /** 按配置单价折算金额（元），保留 6 位小数以免小额被舍成 0 */
-    public static BigDecimal estimateCost(AiProperties properties, Integer promptTokens, Integer completionTokens) {
-        AiProperties.Pricing pricing = properties.getPricing();
+    /**
+     * 补齐依赖运行时配置的两个字段：模型名与估算成本。
+     * 放在这里而不是 {@code AiCallLogWriter}，是为了避免 Writer ←→ Recorder 的构造期循环依赖。
+     */
+    private void fillRuntimeFields(AiCallLog entity, Integer promptTokens, Integer completionTokens) {
+        entity.setModel(settingsProvider.current().model());
+        entity.setEstimatedCost(estimateCost(promptTokens, completionTokens));
+    }
+
+    /**
+     * 按**当前生效单价**折算金额（元），保留 6 位小数以免小额被舍成 0。
+     *
+     * <p>单价现在可以在后台配置（{@code bobo_ai_setting.price_input/price_output}），
+     * 因此这里读运行时快照而不是构造期注入的 yml 值——否则管理员改完单价，
+     * 成本统计仍按旧价计算，报表与"实际账单"对不上。
+     */
+    public BigDecimal estimateCost(Integer promptTokens, Integer completionTokens) {
+        AiSettingsProvider.RuntimeSettings settings = settingsProvider.current();
         BigDecimal in = BigDecimal.valueOf(promptTokens == null ? 0 : promptTokens)
-                .multiply(BigDecimal.valueOf(pricing.getInputPerMillion()));
+                .multiply(settings.priceInput());
         BigDecimal out = BigDecimal.valueOf(completionTokens == null ? 0 : completionTokens)
-                .multiply(BigDecimal.valueOf(pricing.getOutputPerMillion()));
+                .multiply(settings.priceOutput());
         return in.add(out)
                 .divide(BigDecimal.valueOf(1_000_000), 6, RoundingMode.HALF_UP);
     }

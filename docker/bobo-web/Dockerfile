@@ -13,6 +13,13 @@ ARG REGISTRY=
 # ---------- 构建阶段 ----------
 FROM ${REGISTRY}node:22-alpine AS builder
 
+# 站点 base 路径：站点可以部署在子路径下（例如 /bobo-campus/）。
+# 必须在**构建期**注入，因为 Vite 要把 base 写进产物路径与 import.meta.env.BASE_URL。
+# 默认 '/' 保证不传参时行为与以前完全一致。
+# 注意：改这个值后 nginx 的 location 也要同步（见 docker/bobo-web/nginx/default.conf 顶部说明）。
+ARG VITE_BASE=/
+ENV VITE_BASE=${VITE_BASE}
+
 WORKDIR /build
 
 # 用 corepack 激活 package.json 里 packageManager 指定的 pnpm 版本，

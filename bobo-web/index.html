@@ -2,7 +2,9 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" href="/favicon.ico" />
+    <!-- 注意：public/ 下只有 favicon.svg（品牌图由 make-brand-assets.py 生成），
+         之前这里写的是 /favicon.ico，请求会 404。Vite 会给这个绝对路径自动加上 base。 -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#ffd100" />
     <meta name="description" content="bobo 校园二手交易平台 —— 同校闲置，当面交易更放心" />

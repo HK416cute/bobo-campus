@@ -1,7 +1,6 @@
 package com.bobo.ai;
 
 import com.bobo.ai.spi.ChatInvoker;
-import com.bobo.config.props.AiProperties;
 import com.bobo.domain.entity.AiCallLog;
 import com.bobo.mapper.AiCallLogMapper;
 import com.bobo.security.AuthContext;
@@ -42,7 +41,7 @@ public class AiExecutor {
     /** 来源：本地规则（降级） */
     public static final String SOURCE_RULE = "rule";
 
-    private final AiProperties properties;
+    private final AiSettingsProvider settingsProvider;
     private final AiAvailability availability;
     private final AiRateLimiter rateLimiter;
     private final AiCallRecorder recorder;
@@ -93,16 +92,16 @@ public class AiExecutor {
         // 3) 每日配额（按成功+降级次数计，防止绕过限流慢速刷量）
         if (userId != null) {
             int used = callLogMapper.countTodayByUser(userId);
-            int quota = properties.getRate().getDailyQuota();
+            int quota = settingsProvider.current().dailyQuota();
             if (used >= quota) {
                 return AiOutcome.rule(degrade.get(),
                         "今日 AI 使用次数已达上限（" + quota + " 次）", null);
             }
         }
 
-        // 4) 调用 + 解析校验
+        // 4) 调用 + 解析校验（重试次数也读运行时配置）
         long start = System.currentTimeMillis();
-        int attempts = Math.max(1, properties.getMaxAttempts());
+        int attempts = Math.max(1, settingsProvider.current().maxAttempts());
         String lastError = null;
         for (int attempt = 1; attempt <= attempts; attempt++) {
             try {

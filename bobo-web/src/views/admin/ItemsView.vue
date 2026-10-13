@@ -184,6 +184,8 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminApi } from '@/api'
+// 占位图必须走 withBase：站点部署在子路径下时，硬编码 '/img/…' 会指向站点根的 404
+import { DEFAULT_COVER } from '@/utils/format'
 
 /**
  * 商品管理。
@@ -196,8 +198,6 @@ const STATUS_MAP = {
   3: '已下架',
   4: '已驳回'
 }
-
-const DEFAULT_COVER = '/img/img-default-cover.svg'
 
 const loading = ref(false)
 const list = ref([])

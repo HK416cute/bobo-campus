@@ -211,7 +211,16 @@ const routes = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  /**
+   * history base 必须来自 Vite 的 base（见 vite.config.js 注释）：
+   * 站点部署在 /bobo-campus/ 时，router 需要知道自己挂在哪个前缀下，
+   * 否则 window.location 与路由记录对不上——表现是首屏能打开、一刷新就 404 或白屏。
+   *
+   * 这里用 import.meta.env.BASE_URL（Vite 注入的 base 值，形如 '/bobo-campus/'），
+   * 好处是**业务代码里的 router.push('/publish') 不需要改**：
+   * Vue Router 会自己把 base 拼上去，路由表里的路径也继续按「应用内绝对路径」书写。
+   */
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes,
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) {

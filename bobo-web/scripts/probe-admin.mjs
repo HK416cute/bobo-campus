@@ -27,6 +27,34 @@ const USER = process.env.BOBO_ADMIN_USER || 'admin'
 const PASS = process.env.BOBO_ADMIN_PASS || 'password'
 
 /**
+ * 站点可能部署在子路径下（如 BOBO_SITE=http://host/bobo-campus），
+ * 而下面的 MENU/前台路由都按「应用内绝对路径」书写（与 vue-router 的路由表一致）。
+ * 这两个小工具负责在「浏览器 URL」与「应用内路径」之间换算，
+ * 避免把 /bobo-campus 前缀硬编码进断言——否则换个部署路径探针就全红，
+ * 而应用其实是好的（本机踩过：子路径部署时 12 项误报失败）。
+ */
+function urlOf(appPath) {
+  const base = BASE.endsWith('/') ? BASE.slice(0, -1) : BASE
+  return appPath === '/' ? `${base}/` : `${base}${appPath}`
+}
+
+/** 把浏览器看到的 pathname 还原成应用内路径（去掉 BOBO_SITE 的路径前缀） */
+function appPathOf(pathname) {
+  let basePath = ''
+  try {
+    basePath = new URL(BASE).pathname
+  } catch {
+    basePath = ''
+  }
+  basePath = basePath.endsWith('/') ? basePath.slice(0, -1) : basePath
+  if (basePath && pathname.startsWith(basePath)) {
+    const rest = pathname.slice(basePath.length)
+    return rest === '' ? '/' : rest
+  }
+  return pathname
+}
+
+/**
  * 后台菜单的声明顺序必须与 AdminLayout.vue 里 el-menu-item 的顺序一致，
  * 因为 Element Plus 不把 index 渲染成 DOM 属性，只能按位置断言高亮。
  */
@@ -99,7 +127,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function main() {
   console.log(`站点 ${BASE} / CDP ${CDP}`)
 
-  const target = await (await fetch(`${CDP}/json/new?${encodeURIComponent(BASE + '/admin/login')}`, { method: 'PUT' })).json()
+  const target = await (await fetch(`${CDP}/json/new?${encodeURIComponent(urlOf('/admin/login'))}`, { method: 'PUT' })).json()
   const cdp = new Cdp(target.webSocketDebuggerUrl)
   await cdp.ready
   await cdp.send('Runtime.enable')
@@ -126,7 +154,7 @@ async function main() {
   for (let i = 0; i < MENU.length; i++) {
     const m = MENU[i]
     cdp.reset()
-    await cdp.send('Page.navigate', { url: `${BASE}${m.path}` })
+    await cdp.send('Page.navigate', { url: urlOf(m.path) })
     await sleep(2800)
     const raw = await cdp.evaluate(`(() => {
       const host = document.querySelector('.admin-content');
@@ -145,7 +173,7 @@ async function main() {
       });
     })()`)
     const s = JSON.parse(raw)
-    const urlOk = s.href === BASE + m.path
+    const urlOk = appPathOf(new URL(s.href).pathname) === m.path
     const renderOk = s.contentLen > 500 && (s.metric > 0 || !!s.emptyText || /共\s*0\s*条/.test(s.paginationTotal))
     const highlightOk = s.menuCount === MENU.length && s.activeIndexes.length === 1 && s.activeIndexes[0] === i
     const netOk = cdp.failedRequests.length === 0
@@ -154,14 +182,14 @@ async function main() {
     if (!ok) failed++
     const note = s.metric > 0 ? `${m.desc}=${s.metric}` : `空状态="${s.emptyText || s.paginationTotal}"`
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${m.name.padEnd(6)} ${m.path.padEnd(20)} ${note} 高亮#${s.activeIndexes} 内容=${s.contentLen}`)
-    if (!urlOk) console.log(`        期望 URL ${BASE}${m.path}，实际 ${s.href}`)
+    if (!urlOk) console.log(`        期望 ${urlOf(m.path)}，实际 ${s.href}`)
     if (!netOk) console.log('        4xx:', cdp.failedRequests.slice(0, 4).join(' | '))
     if (!jsOk) console.log('        JS 异常:', String(cdp.errors[0]).split('\n')[0])
   }
 
   // ---------- 2. 真实点击菜单：必须跳到对应路由（本脚本抓到的核心 bug） ----------
   console.log('\n[2/3] 真实点击左侧菜单')
-  await cdp.send('Page.navigate', { url: `${BASE}/admin/dashboard` })
+  await cdp.send('Page.navigate', { url: urlOf('/admin/dashboard') })
   await sleep(2500)
   for (let i = 0; i < MENU.length; i++) {
     cdp.reset()
@@ -172,9 +200,11 @@ async function main() {
       await new Promise((r) => setTimeout(r, 1400));
       return location.pathname;
     })()`)
-    const ok = raw === MENU[i].path
+    // 子路径部署时 pathname 形如 /bobo-campus/admin/ai，需先还原成应用内路径再比对
+    const actual = appPathOf(raw)
+    const ok = actual === MENU[i].path
     if (!ok) failed++
-    console.log(`${ok ? 'PASS' : 'FAIL'}  点击第 ${i} 项 -> ${raw}（期望 ${MENU[i].path}）`)
+    console.log(`${ok ? 'PASS' : 'FAIL'}  点击第 ${i} 项 -> ${actual}（期望 ${MENU[i].path}）`)
   }
 
   // ---------- 3. 前台页面冒烟 ----------
@@ -187,7 +217,7 @@ async function main() {
   ]
   for (const f of front) {
     cdp.reset()
-    await cdp.send('Page.navigate', { url: `${BASE}${f.path}` })
+    await cdp.send('Page.navigate', { url: urlOf(f.path) })
     await sleep(2600)
     const n = await cdp.evaluate(`document.querySelectorAll(${JSON.stringify(f.sel)}).length`)
     const ok = Number(n) > 0 && cdp.errors.length === 0 && cdp.failedRequests.length === 0

@@ -4,6 +4,7 @@ import com.bobo.ai.spi.ChatInvoker;
 import com.bobo.config.props.AiProperties;
 import com.bobo.domain.entity.AiCallLog;
 import com.bobo.mapper.AiCallLogMapper;
+import com.bobo.mapper.AiSettingMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -62,12 +63,64 @@ class AiExecutorTest {
         com.bobo.security.AuthContext.clear();
     }
 
+    /**
+     * 配置源：用真实的 {@link AiSettingsProvider}，但让配置表查询返回 null，
+     * 这样所有值都回落到 {@link AiProperties}——等价于"管理员还没进过后台配置页"的部署形态。
+     *
+     * <p><b>必须是每个测试一个实例</b>：provider 内部缓存快照，
+     * 若门控与调用器各拿到一个新 provider，就会出现"我改了配置但门控仍按旧值判断"
+     * 的假故障（生产里是单例，不存在这个问题）。测试装配必须还原单例语义。
+     */
+    private AiSettingsProvider settingsProvider() {
+        AiSettingMapper settingMapper = mock(AiSettingMapper.class);
+        when(settingMapper.selectById(anyLong())).thenReturn(null);
+        return new AiSettingsProvider(properties, settingMapper);
+    }
+
+    /** 一个测试内共享的配置源（模拟容器里的单例） */
+    private AiSettingsProvider sharedProvider;
+
+    private AiSettingsProvider provider() {
+        if (sharedProvider == null) {
+            sharedProvider = settingsProvider();
+        }
+        return sharedProvider;
+    }
+
+    /** 改了 {@code properties} 之后调用，让快照反映最新值（等价于生产里保存配置后的 reload） */
+    private AiSettingsProvider reloadProvider() {
+        provider().reload();
+        return provider();
+    }
+
     private AiExecutor executorWith(ChatInvoker invoker) {
-        AiAvailability availability = new AiAvailability(properties, invoker);
-        AiRateLimiter rateLimiter = new AiRateLimiter(properties);
-        AiCallLogWriter writer = new AiCallLogWriter(callLogMapper, properties);
-        AiCallRecorder recorder = new AiCallRecorder(writer, properties, invoker);
-        return new AiExecutor(properties, availability, rateLimiter, recorder, invoker, callLogMapper);
+        AiSettingsProvider provider = provider();
+        AiAvailability availability = new AiAvailability(provider, dynamicInvoker(invoker));
+        AiRateLimiter rateLimiter = new AiRateLimiter(provider);
+        AiCallLogWriter writer = new AiCallLogWriter(callLogMapper, provider);
+        AiCallRecorder recorder = new AiCallRecorder(writer, provider, invoker);
+        return new AiExecutor(provider, availability, rateLimiter, recorder, invoker, callLogMapper);
+    }
+
+    /** 门控 + 它的调用器（必须是同一对，否则改替身影响不到门控） */
+    private record Gate(AiAvailability availability, AiChatConfig.DynamicChatInvoker invoker) {
+    }
+
+    private Gate gateWith(ChatInvoker invoker) {
+        AiChatConfig.DynamicChatInvoker dynamic = dynamicInvoker(invoker);
+        return new Gate(new AiAvailability(provider(), dynamic), dynamic);
+    }
+
+    /**
+     * 门控用的调用器：{@link AiAvailability} 需要具体类型 {@code DynamicChatInvoker}
+     * 才能读取 lastError。测试里用官方提供的注入点塞入替身，
+     * 不构造真实的 Spring AI 客户端（那需要真 Key 与网络）。
+     */
+    private AiChatConfig.DynamicChatInvoker dynamicInvoker(ChatInvoker invoker) {
+        AiChatConfig.DynamicChatInvoker dynamic =
+                new AiChatConfig.DynamicChatInvoker(provider());
+        dynamic.setDelegateForTest(invoker);
+        return dynamic;
     }
 
     private String parseTitle(String raw) {
@@ -142,6 +195,7 @@ class AiExecutorTest {
     @DisplayName("未配置 api-key 时不调用模型、不写流水，直接返回规则结果")
     void noApiKeyShortCircuits() {
         properties.setApiKey("");
+        reloadProvider();
         AiExecutor executor = executorWith(mockInvoker);
 
         AiOutcome<String> outcome = executor.execute(AiCallLog.SCENE_PUBLISH_DRAFT,
@@ -149,7 +203,7 @@ class AiExecutorTest {
 
         assertThat(outcome.value()).isEqualTo("规则标题");
         assertThat(outcome.degraded()).isTrue();
-        assertThat(outcome.degradeNote()).contains("api-key");
+        assertThat(outcome.degradeNote()).contains("API Key");
         // 关键断言：无 key 时一次模型调用都不该发出，也不该污染流水表
         assertThat(mockInvoker.remaining()).isZero();
         assertThat(mockInvoker.receivedUserPrompts()).isEmpty();
@@ -171,12 +225,40 @@ class AiExecutorTest {
     }
 
     @Test
+    @DisplayName("门控本身：无 Key 时 modelUsable=false；noop 调用器时 modelUsable=false")
+    void gateBehaviour() {
+        AiSettingsProvider provider = provider();
+        // 必须持有同一对（availability 与它内部的调用器），否则改替身影响不到门控
+        Gate gate = gateWith(mockInvoker);
+        AiAvailability availability = gate.availability();
+
+        // 有 Key 且调用器可用 → 可调用
+        assertThat(availability.modelUsable()).isTrue();
+
+        // 清空 Key → 门控必须关闭（改配置后 reload 才会反映，这正是生产里的语义）
+        properties.setApiKey("");
+        provider.reload();
+        assertThat(availability.modelUsable()).as("无 Key 时门控应关闭").isFalse();
+        assertThat(availability.unavailableReason()).contains("API Key");
+
+        // 恢复 Key，但调用器换成 noop → 门控也必须关闭
+        properties.setApiKey("test-key");
+        provider.reload();
+        assertThat(availability.modelUsable()).isTrue();
+        // 注入 noop 替身：门控必须立刻关闭（这是"包装器要透传 isNoop"的回归点）
+        gate.invoker().setDelegateForTest(new com.bobo.ai.spi.NoopChatInvoker());
+        assertThat(availability.modelUsable()).as("noop 调用器时门控应关闭").isFalse();
+    }
+
+    @Test
     @DisplayName("达到每日配额后停止调用模型，降级并给出可展示的原因")
     void dailyQuotaExhausted() {
         properties.getRate().setDailyQuota(3);
         when(callLogMapper.countTodayByUser(anyLong())).thenReturn(3);
         com.bobo.security.AuthContext.set(new com.bobo.security.AuthContext.LoginUser(2L, "bobo", false));
         mockInvoker.enqueue("{\"title\":\"不该被用到\"}");
+        // 每次 executorWith 都会新建 provider 快照，所以配额要在构建之后改不了——
+        // 这里改成先设属性再构建（properties 在 setUp 里已设好 dailyQuota）
         AiExecutor executor = executorWith(mockInvoker);
 
         AiOutcome<String> outcome = executor.execute(AiCallLog.SCENE_PUBLISH_DRAFT,
@@ -208,19 +290,21 @@ class AiExecutorTest {
     }
 
     @Test
-    @DisplayName("token 折算成本：按 bobo.ai.pricing 单价计算")
+    @DisplayName("token 折算成本：按当前生效单价计算（后台可改，故读运行时快照）")
     void costEstimation() {
         properties.getPricing().setInputPerMillion(2.0);
         properties.getPricing().setOutputPerMillion(8.0);
+        AiCallRecorder recorder = new AiCallRecorder(
+                new AiCallLogWriter(callLogMapper, settingsProvider()), settingsProvider(), mockInvoker);
 
         // 1,000,000 输入 * 2 元 + 1,000,000 输出 * 8 元 = 10 元
-        assertThat(AiCallRecorder.estimateCost(properties, 1_000_000, 1_000_000))
+        assertThat(recorder.estimateCost(1_000_000, 1_000_000))
                 .isEqualByComparingTo(new BigDecimal("10.000000"));
         // 真实量级：420 输入 + 160 输出 ≈ 0.00212 元
-        assertThat(AiCallRecorder.estimateCost(properties, 420, 160))
+        assertThat(recorder.estimateCost(420, 160))
                 .isEqualByComparingTo(new BigDecimal("0.002120"));
         // token 缺失时记 0 而不是抛异常（供应商未返回 usage 的兜底）
-        assertThat(AiCallRecorder.estimateCost(properties, null, null))
+        assertThat(recorder.estimateCost(null, null))
                 .isEqualByComparingTo(BigDecimal.ZERO);
     }
 

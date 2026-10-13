@@ -2,13 +2,164 @@
   <div class="ai-page">
     <!-- 状态：先让管理员知道 AI 到底在不在工作，而不是看一堆 0 -->
     <el-alert
-      v-if="status && !status.available"
+      v-if="settings.storageWarning"
+      type="error"
+      :closable="false"
+      show-icon
+      title="AI 配置表不可用，配置无法保存"
+      :description="settings.storageWarning"
+    />
+    <el-alert
+      v-else-if="settings.clientError"
+      type="error"
+      :closable="false"
+      show-icon
+      title="按当前配置无法构建模型客户端，AI 正在走规则降级"
+      :description="settings.clientError"
+    />
+    <el-alert
+      v-else-if="settings.degraded"
       type="warning"
       :closable="false"
       show-icon
-      :title="`AI 当前处于规则模式：${status.reason || '未配置模型'}`"
-      description="规则模式下发布助手与检索解析仍可用（结果会标注「规则推算」），只是语义泛化能力弱一些。配置 BOBO_AI_API_KEY 后无需改代码即可启用模型。"
+      :title="`AI 当前处于规则模式：${settings.degradeReason || '未配置模型'}`"
+      description="规则模式下发布助手与检索解析仍可用（结果会标注「规则推算」），只是语义泛化能力弱一些。在下面的表单里填好 Key 并保存即可启用模型。"
     />
+    <el-alert
+      v-else
+      type="success"
+      :closable="false"
+      show-icon
+      :title="`AI 已启用：${settings.model}`"
+      description="配置改动保存后立即生效，无需重启容器。"
+    />
+
+    <!-- ============================ 模型配置 ============================ -->
+    <el-card shadow="never" class="section">
+      <template #header>
+        <div class="section-head">
+          <span>模型配置</span>
+          <span class="head-hint">保存即生效，无需重启容器</span>
+        </div>
+      </template>
+
+      <el-form :model="form" label-width="140px" class="settings-form">
+        <el-form-item label="启用 AI">
+          <el-switch v-model="form.enabled" active-text="开" inactive-text="关" inline-prompt />
+          <span class="field-hint">关闭后所有场景走规则实现，不再产生任何模型调用与费用</span>
+        </el-form-item>
+
+        <el-form-item label="API Key">
+          <!--
+            安全约定：这里永远不预填明文。
+            · 输入框为 password 类型，仅在用户主动点「眼睛」图标时明文显示（即"仅输入时可见"）
+            · 服务端已配置时，placeholder 显示脱敏值（如 sk-709****407e）
+            · 留空提交 = 不修改；要清空必须勾选下面的复选框
+          -->
+          <div class="key-row">
+            <el-input
+              v-model="form.apiKey"
+              type="password"
+              show-password
+              autocomplete="new-password"
+              :placeholder="keyPlaceholder"
+              clearable
+            />
+            <el-tag v-if="settings.apiKeyConfigured" type="success" size="small" effect="plain">已配置</el-tag>
+            <el-tag v-else type="info" size="small" effect="plain">未配置</el-tag>
+          </div>
+          <div class="field-hint">
+            留空表示保持原值不变；可直接粘贴 <code>Bearer sk-xxx</code>，保存时会自动去掉前缀。
+          </div>
+          <el-checkbox v-model="form.clearApiKey" class="danger-check">
+            清空已保存的 Key（清空后 AI 立即降级为规则模式）
+          </el-checkbox>
+        </el-form-item>
+
+        <el-form-item label="服务地址">
+          <el-input v-model="form.baseUrl" placeholder="https://api.deepseek.com" />
+          <div class="field-hint">换代理或自建网关只改这里；结尾多余斜杠会自动去掉。</div>
+        </el-form-item>
+
+        <el-form-item label="模型">
+          <div class="model-row">
+            <el-select v-model="form.model" allow-create filterable default-first-option style="width: 260px">
+              <el-option v-for="m in MODEL_OPTIONS" :key="m.value" :label="m.label" :value="m.value" />
+            </el-select>
+            <span class="field-hint">
+              <code>deepseek-chat</code> 便宜快；<code>deepseek-reasoner</code> 更准但更慢更贵
+            </span>
+          </div>
+        </el-form-item>
+
+        <el-divider content-position="left">调用参数</el-divider>
+
+        <div class="grid-2">
+          <el-form-item label="超时（毫秒）">
+            <el-input-number v-model="form.timeoutMs" :min="1000" :max="300000" :step="1000" controls-position="right" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="失败重试次数">
+            <el-input-number v-model="form.maxAttempts" :min="1" :max="5" controls-position="right" style="width: 100%" />
+          </el-form-item>
+        </div>
+
+        <div class="grid-2">
+          <el-form-item label="采样温度">
+            <el-input-number v-model="form.temperature" :min="0" :max="2" :step="0.1" :precision="2" controls-position="right" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="每日配额（次）">
+            <el-input-number v-model="form.dailyQuota" :min="1" :max="100000" controls-position="right" style="width: 100%" />
+          </el-form-item>
+        </div>
+        <div class="field-hint param-hint">
+          结构化抽取要稳定，温度建议 0.1~0.3；配额用于防止脚本刷接口烧穿额度。
+        </div>
+
+        <el-divider content-position="left">限流与计价</el-divider>
+
+        <div class="grid-2">
+          <el-form-item label="全局 QPS">
+            <el-input-number v-model="form.globalQps" :min="1" :max="1000" controls-position="right" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="单用户 QPS">
+            <el-input-number v-model="form.userQps" :min="1" :max="1000" controls-position="right" style="width: 100%" />
+          </el-form-item>
+        </div>
+
+        <div class="grid-2">
+          <el-form-item label="输入单价（元/百万）">
+            <el-input-number v-model="form.priceInput" :min="0" :step="0.5" :precision="4" controls-position="right" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="输出单价（元/百万）">
+            <el-input-number v-model="form.priceOutput" :min="0" :step="0.5" :precision="4" controls-position="right" style="width: 100%" />
+          </el-form-item>
+        </div>
+        <div class="field-hint param-hint">单价只用于把 token 折算成成本展示，不影响实际计费。</div>
+
+        <el-form-item class="actions">
+          <el-button type="primary" :loading="saving" @click="saveSettings">保存并生效</el-button>
+          <el-button :loading="testing" @click="testConnection">测试连通性</el-button>
+          <el-button text @click="loadSettings">重新读取</el-button>
+          <span v-if="settings.updateTime" class="field-hint">最后修改：{{ settings.updateTime }}</span>
+        </el-form-item>
+      </el-form>
+
+      <el-alert
+        v-if="testResult"
+        :type="testResult.success ? 'success' : 'error'"
+        :closable="false"
+        show-icon
+        class="test-result"
+        :title="testResult.success
+          ? `连通正常（${testResult.model}，${testResult.latencyMs} ms）`
+          : `测试失败：${testResult.message}`"
+      >
+        <div v-if="testResult.success" class="test-detail">
+          模型回复片段：<code>{{ testResult.replyPreview }}</code>
+          <span v-if="testResult.promptTokens"> · 用量 {{ testResult.promptTokens }}+{{ testResult.completionTokens }} tokens</span>
+        </div>
+      </el-alert>
+    </el-card>
 
     <div class="cards">
       <el-card shadow="never" class="card">
@@ -203,6 +354,119 @@ const status = ref(null)
 const metrics = ref({})
 const moderationList = ref([])
 
+// ------------------------------------------------------------------ 模型配置
+/**
+ * 表单字段与后端 AiSettingsDTO 一一对应。
+ * 语义：**留空 / null = 不修改**（部分更新），所以除了 enabled 与 key 之外，
+ * 其余字段都从服务端读回当前值直接展示，用户不动就原样回传。
+ */
+const settings = ref({})
+const saving = ref(false)
+const testing = ref(false)
+const testResult = ref(null)
+
+const MODEL_OPTIONS = [
+  { label: 'deepseek-chat（通用，便宜快）', value: 'deepseek-chat' },
+  { label: 'deepseek-reasoner（推理，更慢更贵）', value: 'deepseek-reasoner' }
+]
+
+const form = ref({
+  enabled: true,
+  apiKey: '',
+  clearApiKey: false,
+  baseUrl: '',
+  model: 'deepseek-chat',
+  timeoutMs: 15000,
+  maxAttempts: 1,
+  temperature: 0.2,
+  globalQps: 10,
+  userQps: 2,
+  dailyQuota: 200,
+  priceInput: 2,
+  priceOutput: 8
+})
+
+/** Key 输入框的提示语：已配置时显示脱敏值，让管理员知道当前用的是哪个 Key 而不泄露它 */
+const keyPlaceholder = ref('请输入 API Key')
+
+function applySettings(data) {
+  settings.value = data || {}
+  form.value.enabled = data?.enabled !== false
+  // 关键：apiKey 永远不预填明文，保持输入框为空
+  form.value.apiKey = ''
+  form.value.clearApiKey = false
+  form.value.baseUrl = data?.baseUrl || ''
+  form.value.model = data?.model || 'deepseek-chat'
+  form.value.timeoutMs = data?.timeoutMs ?? 15000
+  form.value.maxAttempts = data?.maxAttempts ?? 1
+  form.value.temperature = data?.temperature ?? 0.2
+  form.value.globalQps = data?.globalQps ?? 10
+  form.value.userQps = data?.userQps ?? 2
+  form.value.dailyQuota = data?.dailyQuota ?? 200
+  form.value.priceInput = Number(data?.priceInput ?? 2)
+  form.value.priceOutput = Number(data?.priceOutput ?? 8)
+  keyPlaceholder.value = data?.apiKeyConfigured
+    ? `已配置：${data.apiKeyMasked}（留空则不修改）`
+    : '尚未配置，请填入 API Key'
+}
+
+async function loadSettings() {
+  try {
+    applySettings(await adminApi.aiGetSettings())
+  } catch (e) {
+    // 提示由 http.js 处理
+  }
+}
+
+async function saveSettings() {
+  if (form.value.clearApiKey && form.value.apiKey) {
+    ElMessage.warning('既要清空又填了新 Key，请二选一')
+    return
+  }
+  saving.value = true
+  try {
+    // 只提交需要变更的字段：Key 留空时不传，避免把已保存的 Key 覆盖成空
+    const payload = {
+      enabled: form.value.enabled,
+      clearApiKey: form.value.clearApiKey,
+      baseUrl: form.value.baseUrl,
+      model: form.value.model,
+      timeoutMs: form.value.timeoutMs,
+      maxAttempts: form.value.maxAttempts,
+      temperature: form.value.temperature,
+      globalQps: form.value.globalQps,
+      userQps: form.value.userQps,
+      dailyQuota: form.value.dailyQuota,
+      priceInput: form.value.priceInput,
+      priceOutput: form.value.priceOutput
+    }
+    if (form.value.apiKey.trim()) {
+      payload.apiKey = form.value.apiKey.trim()
+    }
+    applySettings(await adminApi.aiSaveSettings(payload))
+    testResult.value = null
+    ElMessage.success('配置已保存并立即生效')
+    loadStatus()
+  } catch (e) {
+    // 提示由 http.js 处理
+  } finally {
+    saving.value = false
+  }
+}
+
+async function testConnection() {
+  testing.value = true
+  testResult.value = null
+  try {
+    // 用「已保存的」配置测试：未保存的改动不参与，避免误以为改了就生效
+    testResult.value = await adminApi.aiTestSettings(form.value.model)
+  } catch (e) {
+    // 提示由 http.js 处理
+  } finally {
+    testing.value = false
+  }
+}
+
 const reportDays = ref(7)
 const reportLoading = ref(false)
 const report = ref('')
@@ -287,6 +551,7 @@ async function runModerate() {
 }
 
 onMounted(() => {
+  loadSettings()
   loadStatus()
   loadMetrics()
   loadModerationList()
@@ -298,6 +563,85 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.head-hint {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--bobo-text-secondary);
+}
+
+/* ---------------------------------------------------------------- 模型配置表单 */
+.settings-form {
+  max-width: 760px;
+}
+
+.settings-form .field-hint {
+  width: 100%;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--bobo-text-secondary);
+}
+
+.settings-form .param-hint {
+  margin: -6px 0 14px;
+}
+
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.key-row .el-input {
+  flex: 1;
+}
+
+.danger-check {
+  margin-top: 4px;
+}
+
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.settings-form .grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+}
+
+.settings-form .actions .el-form-item__content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.test-result {
+  margin-top: 4px;
+}
+
+.test-detail {
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.test-detail code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bobo-bg);
+}
+
+@media (max-width: 720px) {
+  .settings-form .grid-2 {
+    grid-template-columns: 1fr;
+  }
 }
 
 .cards {

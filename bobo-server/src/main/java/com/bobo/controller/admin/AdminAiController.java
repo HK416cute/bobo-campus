@@ -3,6 +3,7 @@ package com.bobo.controller.admin;
 import com.bobo.ai.AdminCopilotService;
 import com.bobo.ai.AiMetricsService;
 import com.bobo.ai.AiModerationService;
+import com.bobo.ai.AiSettingsService;
 import com.bobo.common.Result;
 import com.bobo.domain.dto.Dtos;
 import com.bobo.domain.vo.AiVos;
@@ -12,6 +13,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -40,6 +42,25 @@ public class AdminAiController {
     private final AiMetricsService metricsService;
     private final AiModerationService moderationService;
     private final AdminCopilotService copilotService;
+    private final AiSettingsService settingsService;
+
+    @Operation(summary = "读取 AI 模型配置（Key 已脱敏，永不返回明文）")
+    @GetMapping("/settings")
+    public Result<AiVos.AiSettingsVO> settings() {
+        return Result.ok(settingsService.get());
+    }
+
+    @Operation(summary = "保存 AI 模型配置（保存即生效，无需重启容器）")
+    @PutMapping("/settings")
+    public Result<AiVos.AiSettingsVO> updateSettings(@Valid @RequestBody Dtos.AiSettingsDTO dto) {
+        return Result.ok("配置已保存并生效", settingsService.update(dto));
+    }
+
+    @Operation(summary = "测试模型连通性（真发一次最小请求，验证 Key 与地址）")
+    @PostMapping("/settings/test")
+    public Result<AiVos.AiTestResultVO> testSettings(@RequestBody(required = false) Dtos.AiTestDTO dto) {
+        return Result.ok(settingsService.test(dto == null ? null : dto.model()));
+    }
 
     @Operation(summary = "AI 效果面板：调用量/成功率/降级率/耗时/成本/采纳率")
     @GetMapping("/metrics")

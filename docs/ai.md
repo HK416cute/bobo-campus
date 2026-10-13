@@ -140,20 +140,39 @@ outcome.source();  // "ai" / "rule" —— 前端据此打标签，不假装是 
 | `pricing.input-per-million` | `BOBO_AI_PRICE_INPUT` | `2.0` | 元/百万 token，仅用于成本估算 |
 | `pricing.output-per-million` | `BOBO_AI_PRICE_OUTPUT` | `8.0` | 同上 |
 
-**接入步骤**：
+**接入步骤（推荐：后台可视化配置，改完立即生效）**：
 
-```bash
-# 1) 申请 key：https://platform.deepseek.com/api_keys
-# 2) 注入环境变量（不要写进仓库）
-export BOBO_AI_API_KEY=sk-xxxxxxxx
-# 3) 启动后看日志确认形态；出现下面这行说明已启用
-#    AI 能力已启用：model=deepseek-chat, baseUrl=https://api.deepseek.com, ...
-#    未配 key 时会打印：AI 能力降级为规则模式：未配置 bobo.ai.api-key，已降级为规则模式
 ```
+1) 申请 key：https://platform.deepseek.com/api_keys
+2) 管理后台 → 左侧「AI 运营」→「模型配置」
+3) 填入 API Key：password 输入框，仅在你点「眼睛」图标时才明文显示（"仅输入时可见"）；
+   服务端已配置时输入框保持为空、placeholder 显示脱敏值（如 sk-709****407e），
+   接口永不返回明文，日志也只记「已设置/未设置」
+4) 点「测试连通性」→ 真发一次最小请求，验证 Key 与地址是否可用
+5) 点「保存并生效」→ 立即重建模型客户端，无需重启容器
+```
+
+**也可以用环境变量**（适合 CI / 无人值守部署）：`BOBO_AI_API_KEY` 依然有效。
+规则是「**配置表里有值以配置表为准，表里为空则回落环境变量**」——
+所以首次部署只要注入环境变量就能直接用，之后想改再进后台。
+
+**为什么需要这张表**：`bobo.ai.*`（yml / 环境变量）只在容器启动时读一次，改完必须重启。
+运行期配置放在数据库单行表 `bobo_ai_setting`，由 `AiSettingsProvider` 做
+「库优先、环境兜底」的合并，写操作后热重建模型客户端（`DynamicChatInvoker.reload()`）。
+
+**清空 Key 的语义**：勾选「清空已保存的 Key」会**同时关闭总开关**。
+这是刻意的——若只清 Key，合并规则会让环境变量里的旧 Key 悄悄接管，
+表现为「我清空了怎么还在扣费」。要恢复只需重新填 Key（填了自动视为启用）。
+
+**可配置项**（全部在页面上，不再依赖写死的内定值）：
+启用开关、API Key、服务地址、模型、超时、重试次数、采样温度、每日配额、
+全局 QPS、单用户 QPS、输入/输出 token 单价。
+
 
 ## 八、数据库
 
-新增 3 张表，脚本 `mysql/init/03-ai.sql`（结构）与 `04-seed-ai.sql`（演示数据），
+新增 4 张表，脚本 `mysql/init/03-ai.sql`（流水/反馈/审核）、
+`04-seed-ai.sql`（演示数据）、`05-ai-setting.sql`（**运行期配置**），
 由 MySQL 官方镜像按文件名顺序自动执行，**必须在 01/02 之后**。
 
 | 表 | 作用 | 关键列 |
@@ -161,9 +180,11 @@ export BOBO_AI_API_KEY=sk-xxxxxxxx
 | `bobo_ai_call_log` | 调用流水：成功率、耗时、token、成本 | `scene` / `status` / `latency_ms` / `estimated_cost` / `input_hash` |
 | `bobo_ai_suggestion_feedback` | 建议与采纳：**采纳率的唯一事实来源** | `suggestion_type` / `accepted` / `suggested_value` / `final_value` |
 | `bobo_ai_moderation` | 内容审核结论：事前风险判定 | `content_hash`(幂等键) / `risk_level` / `decision_source` |
+| `bobo_ai_setting` | **运行期配置（单行表）**：Key/模型/限流/单价 | `setting_id`(恒为1) / `api_key` / `model` / 各限额 |
 
-**三张表都刻意不加 `del_flag`**：它们属于审计数据，只追加不软删；
+**审计类三张表刻意不加 `del_flag`**：它们属于审计数据，只追加不软删；
 要清理按时间归档，避免"逻辑删除"把统计口径搞脏。
+配置表则是单行覆盖写，用主键 `setting_id=1` 约束住，避免出现"两份配置哪个生效"的歧义。
 
 ## 九、测试与评测
 

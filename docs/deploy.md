@@ -82,36 +82,61 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1/api/categories     # 2
 
 ### 2.1 已有部署升级到「带 AI 版本」（重要，AI 升级必读）
 
-AI 版本新增了一个 init 脚本与一个环境变量，**对已有数据卷不会自动生效**，必须手工做三步：
+AI 版本新增了 init 脚本与站点子路径，**对已有数据卷不会自动生效**，必须手工做三步：
 
 ```bash
-# 1) 建 AI 的三张表（init 脚本不会重跑，手动导入）
+# 1) 建 AI 相关表（init 脚本不会重跑，手动导入）
 docker compose exec -T bobo-mysql mysql -ubobo -p"$PW" --default-character-set=utf8mb4 bobo \
   < mysql/init/03-ai.sql
-# 可选：AI 演示数据（让后台「AI 运营」面板一进去就有数）
+# 运行期配置表（后台「AI 运营 → 模型配置」保存到这张表；不建表则只能靠环境变量）
+docker compose exec -T bobo-mysql mysql -ubobo -p"$PW" --default-character-set=utf8mb4 bobo \
+  < mysql/init/05-ai-setting.sql
+# 可选：AI 演示数据（让后台面板一进去就有数）
 docker compose exec -T bobo-mysql mysql -ubobo -p"$PW" --default-character-set=utf8mb4 bobo \
   < mysql/init/04-seed-ai.sql
 
-# 2) 在 .env 里补 AI 变量（.env 不入库，需手工维护）
-#    BOBO_AI_API_KEY=sk-xxxx      # 留空则 AI 走规则降级模式，应用照常启动
-#    BOBO_AI_MODEL=deepseek-chat
-
-# 3) 重建并重启两个镜像
+# 2) 重建并重启两个镜像（子路径与配置页都在这一版里）
 docker compose up -d --build --no-deps bobo-server bobo-web
 ```
+
+**AI 配置怎么填**：登录管理后台 →「AI 运营」→「模型配置」→ 填 API Key →
+点「测试连通性」确认可用 → 点「保存并生效」（**不重启容器**）。
+也可以继续用环境变量 `BOBO_AI_API_KEY`：**配置表里有值以配置表为准，表里为空则回落环境变量**，
+所以首次部署只注入环境变量即可用，之后想改再进后台。
+
+### 2.2 站点路径：默认挂在 /bobo-campus/ 下
+
+本版本把整个前端挂在子路径 `/bobo-campus/`，根路径会 302 跳过去：
+`http://<服务器IP>/` → `http://<服务器IP>/bobo-campus/`。
+
+- 前端 base 由 `docker-compose.yml` 的 `bobo-web.build.args.VITE_BASE` 决定
+  （默认 `/bobo-campus/`，可用 `.env` 的 `BOBO_WEB_BASE` 覆盖）；
+- nginx 的 location 前缀写在 `docker/bobo-web/nginx/default.conf`；
+- **两处必须一致**，改一处不改另一处的典型表现是「页面能打开但接口全 404」或白屏。
+
+`/api/**` 与 `/upload/**` 的**根路径版本依然保留**且不做重定向，因为：
+① 数据库里历史图片存的是根路径 URL（如 `/upload/2026/01/x.jpg`），重定向会让老图 404；
+② 容器 HEALTHCHECK 与运维脚本打的是 `/api/categories`。
+带前缀的 `/bobo-campus/api/**` 与 `/bobo-campus/upload/**` 同时可用（nginx 会剥掉前缀）。
+
+**改了 nginx 配置不用重建镜像**：该文件以 `:ro` 挂进容器，改完执行
+`docker exec <web容器> nginx -t && docker exec <web容器> nginx -s reload` 即可生效。
 
 **验证**（两个探针都在仓库里，可复现）：
 
 ```bash
-pwsh -File mysql/e2e/verify-ai.ps1 -BaseUrl http://localhost -AdminToken <管理员token>
-pwsh -File mysql/e2e/verify-ai-adaptive.ps1 -BaseUrl http://localhost
+pwsh -File mysql/e2e/verify-ai.ps1 -BaseUrl http://localhost/bobo-campus -AdminToken <管理员token>
+pwsh -File mysql/e2e/verify-ai-adaptive.ps1 -BaseUrl http://localhost/bobo-campus
+node bobo-web/scripts/probe-admin.mjs   # 需先设 BOBO_SITE=http://localhost/bobo-campus
 ```
 
 `verify-ai.ps1` 用固定数据集断言；`verify-ai-adaptive.ps1` 先读**线上真实分类与价位**再构造查询，
-因此在任何数据集上都能给出有意义结论（线上实测 6/6 命中，对照 LIKE 整句 0 命中）。
+因此在任何数据集上都能给出有意义结论（线上实测 6/6 命中，对照 LIKE 整句 0 命中；
+若在售商品过少它会明确 SKIP 而不是误报失败）。
 
-**不配 key 也可以先上**：`BOBO_AI_API_KEY` 为空时应用正常启动，`/api/ai/status` 会返回
-`{"available":false,"degraded":true}`，发布助手与检索解析仍可用（结果标注「规则推算」）。
+**不配 key 也可以先上**：`BOBO_AI_API_KEY` 为空且配置表里也没填时，应用正常启动，
+`/api/ai/status` 返回 `{"available":false,"degraded":true}`，
+发布助手与检索解析仍可用（结果标注「规则推算」）。
 
 
 ## 三、验证清单

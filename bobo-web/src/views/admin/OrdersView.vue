@@ -173,6 +173,8 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { adminApi } from '@/api'
+// 占位图必须走 withBase：站点部署在子路径下时，硬编码 '/img/…' 会指向站点根的 404
+import { DEFAULT_COVER } from '@/utils/format'
 
 /**
  * 订单管理。后台只做查询与追溯，改状态的操作都在买家/卖家侧，避免越权改单。
@@ -187,8 +189,6 @@ const STATUS_MAP = {
   6: '退款中',
   7: '已退款'
 }
-
-const DEFAULT_COVER = '/img/img-default-cover.svg'
 
 const loading = ref(false)
 const list = ref([])

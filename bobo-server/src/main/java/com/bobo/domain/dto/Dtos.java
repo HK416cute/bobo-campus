@@ -1,6 +1,7 @@
 package com.bobo.domain.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Max;
@@ -348,6 +349,68 @@ public final class Dtos {
             @Schema(description = "问题", example = "最近七天哪个分类的退款最多")
             @NotBlank(message = "请输入问题")
             @Size(max = 200, message = "问题最长 200 个字符") String question
+    ) {
+    }
+
+    /**
+     * AI 模型配置更新。
+     *
+     * <p><b>字段语义：null / 留空 = 不修改</b>（部分更新，避免前端漏传一个字段就把配置清空）。
+     * 要清空 Key 必须显式传 {@code clearApiKey = true}，
+     * 这样「手滑把 Key 清空导致线上 AI 静默失效」就不会发生。
+     */
+    @Schema(description = "AI 模型配置更新（null 表示不修改）")
+    public record AiSettingsDTO(
+            @Schema(description = "总开关") Boolean enabled,
+
+            @Schema(description = "API Key：留空 = 不修改；要清空请用 clearApiKey")
+            @Size(max = 200, message = "Key 长度异常") String apiKey,
+
+            @Schema(description = "显式清空已保存的 Key")
+            Boolean clearApiKey,
+
+            @Schema(description = "服务地址", example = "https://api.deepseek.com")
+            @Size(max = 200, message = "地址过长") String baseUrl,
+
+            @Schema(description = "模型名", example = "deepseek-chat")
+            @Size(max = 100, message = "模型名过长") String model,
+
+            @Schema(description = "单次调用超时（毫秒）")
+            @Min(value = 1000, message = "超时不能小于 1000ms")
+            @Max(value = 300000, message = "超时不能大于 300000ms") Long timeoutMs,
+
+            @Schema(description = "失败重试次数")
+            @Min(value = 1, message = "重试次数至少为 1")
+            @Max(value = 5, message = "重试次数最多为 5") Integer maxAttempts,
+
+            @Schema(description = "采样温度 0~2")
+            @DecimalMin(value = "0.0", message = "温度不能小于 0")
+            @DecimalMax(value = "2.0", message = "温度不能大于 2") Double temperature,
+
+            @Schema(description = "全局限流 QPS")
+            @Min(value = 1, message = "全局 QPS 至少为 1")
+            @Max(value = 1000, message = "全局 QPS 最多为 1000") Integer globalQps,
+
+            @Schema(description = "单用户限流 QPS")
+            @Min(value = 1, message = "单用户 QPS 至少为 1")
+            @Max(value = 1000, message = "单用户 QPS 最多为 1000") Integer userQps,
+
+            @Schema(description = "单用户每日配额")
+            @Min(value = 1, message = "每日配额至少为 1")
+            @Max(value = 100000, message = "每日配额最多为 100000") Integer dailyQuota,
+
+            @Schema(description = "输入 token 单价（元/百万）")
+            @DecimalMin(value = "0.0", message = "单价不能为负") BigDecimal priceInput,
+
+            @Schema(description = "输出 token 单价（元/百万）")
+            @DecimalMin(value = "0.0", message = "单价不能为负") BigDecimal priceOutput
+    ) {
+    }
+
+    @Schema(description = "AI 连通性测试")
+    public record AiTestDTO(
+            @Schema(description = "临时用这个模型名测试，留空用已保存的")
+            @Size(max = 100, message = "模型名过长") String model
     ) {
     }
 }

@@ -116,6 +116,10 @@ services:
       dockerfile: docker/bobo-web/Dockerfile
       args:
         REGISTRY: ${BOBO_REGISTRY:-}
+        # 站点 base 路径（前端产物路径与路由前缀都由它决定）。
+        # 改这个值时必须同步改 docker/bobo-web/nginx/default.conf 里的 location：
+        # 两处不一致的典型表现是「页面能打开但接口全 404」或刷新白屏。
+        VITE_BASE: ${BOBO_WEB_BASE:-/bobo-campus/}
     image: bobo/bobo-web:1.0.0
     container_name: ${BOBO_CONTAINER_PREFIX:-bobo}-web
     restart: always

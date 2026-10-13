@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { withBase } from '@/utils/format'
 
 /**
  * 统一 HTTP 客户端。
@@ -11,7 +12,15 @@ import { ElMessage, ElMessageBox } from 'element-plus'
  *   业务错误码在 body 里，这样前端只需要一处判断逻辑。
  */
 const http = axios.create({
-  baseURL: '/',
+  /**
+   * baseURL 取站点 base：站点部署在 /bobo-campus/ 时，业务代码里的
+   * `request.get('/api/items')` 会拼成 /bobo-campus/api/items。
+   * 这样**业务代码的接口路径一行都不用改**。
+   *
+   * 对应地，nginx 需要把 /bobo-campus/api/ 也反代到后端（见 nginx/default.conf）。
+   * 若哪天要把 base 改回根路径部署，这里会自然跟随，无需改动。
+   */
+  baseURL: import.meta.env.BASE_URL || '/',
   timeout: 20000
 })
 
@@ -77,8 +86,10 @@ function handleUnauthorized(msg) {
     type: 'warning',
     callback: () => {
       redirecting = false
+      // 必须用 withBase 跳转：站点部署在子路径下时，
+      // 直接写 window.location.href = '/login' 会跳出站点前缀（落到站点根的 404）
       const redirect = encodeURIComponent(window.location.pathname + window.location.search)
-      window.location.href = `/login?redirect=${redirect}`
+      window.location.href = withBase(`/login?redirect=${redirect}`)
     }
   }).catch(() => {
     redirecting = false

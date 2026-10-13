@@ -1,7 +1,6 @@
 package com.bobo.ai;
 
 import com.bobo.config.AiAsyncConfig;
-import com.bobo.config.props.AiProperties;
 import com.bobo.domain.entity.AiCallLog;
 import com.bobo.mapper.AiCallLogMapper;
 import lombok.RequiredArgsConstructor;
@@ -32,7 +31,7 @@ import java.time.LocalDateTime;
 public class AiCallLogWriter {
 
     private final AiCallLogMapper callLogMapper;
-    private final AiProperties properties;
+    private final AiSettingsProvider settingsProvider;
 
     /**
      * 同步写入，返回自增主键。调用方需要 {@code logId}（例如反馈表要回指是哪次模型输出）时用。
@@ -61,6 +60,11 @@ public class AiCallLogWriter {
     /**
      * 由本组件统一构造流水实体，避免各场景各拼一份字段（漏字段就会算错成本）。
      *
+     * <p>注意这里<b>不负责</b>填 {@code model} 与 {@code estimatedCost}：
+     * 模型名与单价都取自运行时配置，而依赖方向是「Recorder → Writer」，
+     * 让 Writer 反过来依赖 Recorder 会形成构造期循环。
+     * 由调用方（{@link AiCallRecorder}）在拿到实体后补上这两项。
+     *
      * @param userId 调用方在原线程取到的当前用户，可为 null（匿名）
      */
     public AiCallLog build(String scene, String status, String degradeReason, String errorMsg,
@@ -71,7 +75,6 @@ public class AiCallLogWriter {
         entity.setScene(scene);
         entity.setUserId(userId);
         entity.setProvider(provider);
-        entity.setModel(properties.getModel());
         entity.setInputHash(inputHash);
         entity.setOutputHash(outputHash);
         entity.setPromptTokens(promptTokens);
@@ -81,7 +84,6 @@ public class AiCallLogWriter {
         entity.setStatus(status);
         entity.setDegradeReason(truncate(degradeReason, 255));
         entity.setErrorMsg(truncate(errorMsg, 500));
-        entity.setEstimatedCost(AiCallRecorder.estimateCost(properties, promptTokens, completionTokens));
         entity.setCreateTime(LocalDateTime.now());
         return entity;
     }
