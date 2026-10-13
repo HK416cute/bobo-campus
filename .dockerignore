@@ -1,0 +1,29 @@
+# 前端镜像构建上下文 = 仓库根目录（与后端镜像保持一致的做法）。
+#
+# 为什么不用 bobo-web/ 当上下文：镜像里除了前端产物，还要放
+# docker/bobo-web/nginx/ 下的站点配置；上下文如果只有 bobo-web/，
+# 那两个 COPY 就取不到文件（这正是第一版构建失败的原因）。
+#
+# 用根目录当上下文就必须忽略掉无关的大目录，否则构建会把
+# node_modules（几百 MB）和 target（几十 MB）全发给 daemon。
+
+# 依赖与产物：镜像内会自己重新装、重新构建
+bobo-web/node_modules/
+bobo-web/dist/
+bobo-web/.vite/
+bobo-server/target/
+bobo-server/data/
+
+# 本地开发/工具链缓存与运行产物
+.tools/
+.run/
+node_modules/
+dist/
+
+# 版本库与编辑器
+.git/
+.gitignore
+.idea/
+.vscode/
+*.log
+npm-debug.log*

@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  商品相关的关联查询。
+  约定：所有 JOIN 都在同一 utf8mb4_unicode_ci 排序规则下（见 01-schema.sql），
+       因此不会出现 1267 Illegal mix of collations。
+-->
+<mapper namespace="com.bobo.mapper.ItemMapper">
+
+    <resultMap id="ItemCardMap" type="com.bobo.domain.vo.ItemCardVO">
+        <id     property="itemId"            column="item_id"/>
+        <result property="title"             column="title"/>
+        <result property="price"             column="price"/>
+        <result property="originalPrice"     column="original_price"/>
+        <result property="cover"             column="cover"/>
+        <result property="conditionLevel"    column="condition_level"/>
+        <result property="tradeType"         column="trade_type"/>
+        <result property="status"            column="status"/>
+        <result property="campus"            column="campus"/>
+        <result property="location"          column="location"/>
+        <result property="viewCount"         column="view_count"/>
+        <result property="wantCount"         column="want_count"/>
+        <result property="createTime"        column="create_time"/>
+        <result property="categoryId"        column="category_id"/>
+        <result property="categoryName"      column="category_name"/>
+        <result property="sellerId"          column="seller_id"/>
+        <result property="sellerNickname"    column="seller_nickname"/>
+        <result property="sellerAvatar"      column="seller_avatar"/>
+        <result property="sellerCampus"      column="seller_campus"/>
+        <result property="sellerCreditScore" column="seller_credit_score"/>
+        <result property="sellerVerifyStatus" column="seller_verify_status"/>
+        <result property="favorited"         column="favorited"/>
+    </resultMap>
+
+    <resultMap id="ItemDetailMap" type="com.bobo.domain.vo.ItemDetailVO" extends="ItemCardMap">
+        <result property="description"       column="description"/>
+        <result property="rejectReason"      column="reject_reason"/>
+        <result property="sellerCollege"     column="seller_college"/>
+        <result property="sellerGrade"       column="seller_grade"/>
+        <result property="sellerBio"         column="seller_bio"/>
+        <result property="sellerItemCount"   column="seller_item_count"/>
+    </resultMap>
+
+    <sql id="ItemCardColumns">
+        i.item_id, i.title, i.price, i.original_price, i.cover, i.condition_level, i.trade_type,
+        i.status, i.campus, i.location, i.view_count, i.want_count, i.create_time,
+        i.category_id, c.name AS category_name,
+        i.seller_id, u.nickname AS seller_nickname, u.avatar AS seller_avatar,
+        u.campus AS seller_campus, u.credit_score AS seller_credit_score,
+        u.verify_status AS seller_verify_status
+    </sql>
+
+    <!-- 商品列表：前台搜索、卖家主页、后台管理共用 -->
+    <select id="selectItemPage" resultMap="ItemCardMap">
+        SELECT
+        <include refid="ItemCardColumns"/>
+        <choose>
+            <when test="currentUserId != null">
+                , (SELECT COUNT(1) FROM bobo_favorite f
+                    WHERE f.item_id = i.item_id AND f.user_id = #{currentUserId}) AS favorited
+            </when>
+            <otherwise>
+                , 0 AS favorited
+            </otherwise>
+        </choose>
+        FROM bobo_item i
+        LEFT JOIN bobo_category c ON c.category_id = i.category_id
+        LEFT JOIN bobo_user u ON u.user_id = i.seller_id AND u.del_flag = 0
+        <where>
+            i.del_flag = 0
+            <if test="q.keyword != null and q.keyword != ''">
+                AND (i.title LIKE CONCAT('%', #{q.keyword}, '%')
+                     OR i.description LIKE CONCAT('%', #{q.keyword}, '%'))
+            </if>
+            <if test="q.adminKeyword != null and q.adminKeyword != ''">
+                AND (i.title LIKE CONCAT('%', #{q.adminKeyword}, '%')
+                     OR u.nickname LIKE CONCAT('%', #{q.adminKeyword}, '%')
+                     <if test="q.adminKeyword.matches('\\d+')">
+                         OR i.item_id = #{q.adminKeyword}
+                     </if>)
+            </if>
+            <if test="q.categoryId != null">
+                AND i.category_id = #{q.categoryId}
+            </if>
+            <if test="q.sellerId != null">
+                AND i.seller_id = #{q.sellerId}
+            </if>
+            <if test="q.excludeSellerId != null">
+                AND i.seller_id != #{q.excludeSellerId}
+            </if>
+            <if test="q.status != null">
+                AND i.status = #{q.status}
+            </if>
+            <if test="q.minPrice != null">
+                AND i.price &gt;= #{q.minPrice}
+            </if>
+            <if test="q.maxPrice != null">
+                AND i.price &lt;= #{q.maxPrice}
+            </if>
+            <if test="q.campus != null and q.campus != ''">
+                AND i.campus = #{q.campus}
+            </if>
+            <if test="q.conditionLevel != null and q.conditionLevel != ''">
+                AND i.condition_level = #{q.conditionLevel}
+            </if>
+            <if test="q.tradeType != null">
+                AND (i.trade_type = #{q.tradeType} OR i.trade_type = 0)
+            </if>
+            <if test="q.onlyFavorite != null and q.onlyFavorite and currentUserId != null">
+                AND EXISTS (SELECT 1 FROM bobo_favorite f2
+                            WHERE f2.item_id = i.item_id AND f2.user_id = #{currentUserId})
+            </if>
+        </where>
+        <choose>
+            <when test="q.sortBy == 'priceAsc'">ORDER BY i.price ASC, i.item_id DESC</when>
+            <when test="q.sortBy == 'priceDesc'">ORDER BY i.price DESC, i.item_id DESC</when>
+            <when test="q.sortBy == 'want'">ORDER BY i.want_count DESC, i.item_id DESC</when>
+            <when test="q.sortBy == 'hot'">ORDER BY i.view_count DESC, i.item_id DESC</when>
+            <otherwise>ORDER BY i.create_time DESC, i.item_id DESC</otherwise>
+        </choose>
+    </select>
+
+    <!-- 商品详情 -->
+    <select id="selectItemDetail" resultMap="ItemDetailMap">
+        SELECT
+        <include refid="ItemCardColumns"/>,
+        i.description, i.reject_reason,
+        u.college AS seller_college, u.grade AS seller_grade, u.bio AS seller_bio,
+        (SELECT COUNT(1) FROM bobo_item i2
+          WHERE i2.seller_id = i.seller_id AND i2.del_flag = 0 AND i2.status = 1) AS seller_item_count,
+        <choose>
+            <when test="currentUserId != null">
+                (SELECT COUNT(1) FROM bobo_favorite f
+                  WHERE f.item_id = i.item_id AND f.user_id = #{currentUserId}) AS favorited
+            </when>
+            <otherwise>
+                0 AS favorited
+            </otherwise>
+        </choose>
+        FROM bobo_item i
+        LEFT JOIN bobo_category c ON c.category_id = i.category_id
+        LEFT JOIN bobo_user u ON u.user_id = i.seller_id AND u.del_flag = 0
+        WHERE i.item_id = #{itemId} AND i.del_flag = 0
+    </select>
+
+    <!-- 卖家在售的其他商品 -->
+    <select id="selectSellerOtherItems" resultMap="ItemCardMap">
+        SELECT
+        <include refid="ItemCardColumns"/>,
+        0 AS favorited
+        FROM bobo_item i
+        LEFT JOIN bobo_category c ON c.category_id = i.category_id
+        LEFT JOIN bobo_user u ON u.user_id = i.seller_id AND u.del_flag = 0
+        WHERE i.del_flag = 0
+          AND i.status = 1
+          AND i.seller_id = #{sellerId}
+        <if test="excludeItemId != null">
+            AND i.item_id != #{excludeItemId}
+        </if>
+        ORDER BY i.create_time DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 批量取卡片（订单 / 举报等场景） -->
+    <select id="selectCardsByIds" resultMap="ItemCardMap">
+        SELECT
+        <include refid="ItemCardColumns"/>,
+        0 AS favorited
+        FROM bobo_item i
+        LEFT JOIN bobo_category c ON c.category_id = i.category_id
+        LEFT JOIN bobo_user u ON u.user_id = i.seller_id AND u.del_flag = 0
+        WHERE i.item_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+
+</mapper>

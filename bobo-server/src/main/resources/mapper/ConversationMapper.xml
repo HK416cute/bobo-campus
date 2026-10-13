@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bobo.mapper.ConversationMapper">
+
+    <resultMap id="ConversationVOMap" type="com.bobo.domain.vo.ConversationVO">
+        <id     property="conversationId" column="conversation_id"/>
+        <result property="itemId"         column="item_id"/>
+        <result property="itemTitle"      column="item_title"/>
+        <result property="itemCover"      column="item_cover"/>
+        <result property="itemPrice"      column="item_price"/>
+        <result property="itemStatus"     column="item_status"/>
+        <result property="peerId"         column="peer_id"/>
+        <result property="peerNickname"   column="peer_nickname"/>
+        <result property="peerAvatar"     column="peer_avatar"/>
+        <result property="peerCampus"     column="peer_campus"/>
+        <result property="lastMessage"    column="last_message"/>
+        <result property="lastTime"       column="last_time"/>
+        <result property="unread"         column="unread"/>
+    </resultMap>
+
+    <select id="selectConversationPage" resultMap="ConversationVOMap">
+        SELECT
+            c.conversation_id,
+            c.item_id,
+            i.title  AS item_title,
+            i.cover  AS item_cover,
+            i.price  AS item_price,
+            i.status AS item_status,
+            CASE WHEN c.buyer_id = #{currentUserId} THEN c.seller_id ELSE c.buyer_id END AS peer_id,
+            CASE WHEN c.buyer_id = #{currentUserId} THEN su.nickname ELSE bu.nickname END AS peer_nickname,
+            CASE WHEN c.buyer_id = #{currentUserId} THEN su.avatar   ELSE bu.avatar   END AS peer_avatar,
+            CASE WHEN c.buyer_id = #{currentUserId} THEN su.campus   ELSE bu.campus   END AS peer_campus,
+            c.last_message,
+            c.last_time,
+            CASE WHEN c.buyer_id = #{currentUserId} THEN c.buyer_unread ELSE c.seller_unread END AS unread
+        FROM bobo_conversation c
+        LEFT JOIN bobo_item i  ON i.item_id = c.item_id
+        LEFT JOIN bobo_user bu ON bu.user_id = c.buyer_id
+        LEFT JOIN bobo_user su ON su.user_id = c.seller_id
+        <where>
+            c.del_flag = 0
+            AND (c.buyer_id = #{currentUserId} OR c.seller_id = #{currentUserId})
+            <if test="q.role == 'buyer'">
+                AND c.buyer_id = #{currentUserId}
+            </if>
+            <if test="q.role == 'seller'">
+                AND c.seller_id = #{currentUserId}
+            </if>
+        </where>
+        ORDER BY c.last_time DESC, c.conversation_id DESC
+    </select>
+
+</mapper>

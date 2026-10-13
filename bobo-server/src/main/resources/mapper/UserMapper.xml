@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bobo.mapper.UserMapper">
+
+    <resultMap id="UserVOMap" type="com.bobo.domain.vo.SimpleVos$UserVO">
+        <id     property="userId"       column="user_id"/>
+        <result property="username"     column="username"/>
+        <result property="nickname"     column="nickname"/>
+        <result property="avatar"       column="avatar"/>
+        <result property="campus"       column="campus"/>
+        <result property="college"      column="college"/>
+        <result property="grade"        column="grade"/>
+        <result property="bio"          column="bio"/>
+        <result property="creditScore"  column="credit_score"/>
+        <result property="role"         column="role"/>
+        <result property="verifyStatus" column="verify_status"/>
+        <result property="status"       column="status"/>
+        <result property="phone"        column="phone"/>
+        <result property="email"        column="email"/>
+        <result property="createTime"   column="create_time"/>
+    </resultMap>
+
+    <select id="selectUserPage" resultMap="UserVOMap">
+        SELECT u.user_id, u.username, u.nickname, u.avatar, u.campus, u.college, u.grade, u.bio,
+               u.credit_score, u.role, u.verify_status, u.status, u.phone, u.email, u.create_time
+        FROM bobo_user u
+        <where>
+            u.del_flag = 0
+            <if test="q.keyword != null and q.keyword != ''">
+                AND (u.nickname LIKE CONCAT('%', #{q.keyword}, '%')
+                     OR u.username LIKE CONCAT('%', #{q.keyword}, '%')
+                     OR u.student_no LIKE CONCAT('%', #{q.keyword}, '%')
+                     OR u.phone LIKE CONCAT('%', #{q.keyword}, '%'))
+            </if>
+            <if test="q.role != null and q.role != ''">
+                AND u.role = #{q.role}
+            </if>
+            <if test="q.status != null">
+                AND u.status = #{q.status}
+            </if>
+            <if test="q.verifyStatus != null">
+                AND u.verify_status = #{q.verifyStatus}
+            </if>
+            <if test="q.campus != null and q.campus != ''">
+                AND u.campus = #{q.campus}
+            </if>
+        </where>
+        ORDER BY u.user_id DESC
+    </select>
+
+</mapper>

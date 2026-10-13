@@ -1,0 +1,122 @@
+# =============================================================================
+# bobo 校园二手交易平台 —— 后端主配置
+# 所有外部依赖（数据库、上传目录、JWT 密钥）都通过环境变量注入，
+# 默认值保证「本机直接 run」也能起来；容器里由 docker-compose 覆盖。
+# =============================================================================
+server:
+  port: ${SERVER_PORT:9080}
+  servlet:
+    context-path: /
+  tomcat:
+    uri-encoding: UTF-8
+    threads:
+      max: 200
+
+spring:
+  application:
+    name: bobo-server
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:prod}
+  mvc:
+    throw-exception-if-no-handler-found: false
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 10MB
+      max-request-size: 40MB
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:bobo}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true
+    username: ${MYSQL_USERNAME:bobo}
+    password: ${MYSQL_PASSWORD:bobo123456}
+    hikari:
+      minimum-idle: 5
+      maximum-pool-size: 20
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      pool-name: boboHikariPool
+
+# MyBatis-Plus
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  type-aliases-package: com.bobo.domain.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    cache-enabled: false
+    # 开发期打开可看到 SQL，生产建议改回 NoLoggingImpl
+    log-impl: ${MYBATIS_LOG_IMPL:org.apache.ibatis.logging.nologging.NoLoggingImpl}
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      logic-delete-field: delFlag
+      logic-delete-value: 2
+      logic-not-delete-value: 0
+
+# bobo 业务配置
+bobo:
+  # JWT：生产环境必须通过环境变量 BOBO_JWT_SECRET 覆盖（至少 32 字符）
+  jwt:
+    secret: ${BOBO_JWT_SECRET:bobo-campus-second-hand-trading-platform-secret-key-2026}
+    # token 有效期（分钟），默认 7 天
+    expire-minutes: ${BOBO_JWT_EXPIRE_MINUTES:10080}
+    header: Authorization
+    prefix: "Bearer "
+  upload:
+    # 容器内挂载到 named volume；本机默认写到用户目录下的 bobo-upload
+    path: ${BOBO_UPLOAD_PATH:./data/upload}
+    # 对外访问前缀，由 nginx 反向代理到同一目录
+    url-prefix: ${BOBO_UPLOAD_URL_PREFIX:/upload}
+    max-size-mb: 10
+    allow-ext: jpg,jpeg,png,webp,gif
+  admin:
+    # 允许注册管理员的邀请码（留空则不开放管理员注册）
+    register-code: ${BOBO_ADMIN_REGISTER_CODE:}
+  demo:
+    # 是否开放演示数据重置等运维接口
+    enabled: ${BOBO_DEMO_ENABLED:false}
+  # AI 能力（Spring AI + DeepSeek）。AI 是可选增强：enabled=false 或未配置 api-key 时，
+  # com.bobo.ai 全层自动降级为规则实现，应用照常启动，现有接口行为不变。
+  ai:
+    enabled: ${BOBO_AI_ENABLED:true}
+    # 未配置时视为「无 AI」，走规则降级。生产用环境变量 BOBO_AI_API_KEY 注入，不要写进仓库。
+    api-key: ${BOBO_AI_API_KEY:}
+    base-url: ${BOBO_AI_BASE_URL:https://api.deepseek.com}
+    # deepseek-chat（通用便宜）/ deepseek-reasoner（推理，更慢更贵）
+    model: ${BOBO_AI_MODEL:deepseek-chat}
+    timeout-ms: ${BOBO_AI_TIMEOUT_MS:15000}
+    max-attempts: ${BOBO_AI_MAX_ATTEMPTS:1}
+    # 结构化抽取要稳定，温度调低
+    temperature: ${BOBO_AI_TEMPERATURE:0.2}
+    rate:
+      # 全局限流，防脚本刷接口烧穿额度
+      global-qps: ${BOBO_AI_GLOBAL_QPS:10}
+      user-qps: ${BOBO_AI_USER_QPS:2}
+      # 单用户每日配额
+      daily-quota: ${BOBO_AI_DAILY_QUOTA:200}
+    pricing:
+      # 元 / 百万 token，仅用于流水里估算成本；换模型时按官方价目表改这里，不改代码
+      input-per-million: ${BOBO_AI_PRICE_INPUT:2.0}
+      output-per-million: ${BOBO_AI_PRICE_OUTPUT:8.0}
+
+# 接口文档
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+
+logging:
+  level:
+    root: info
+    com.bobo: ${BOBO_LOG_LEVEL:info}
+  file:
+    name: ${BOBO_LOG_PATH:./data/logs}/bobo-server.log
+  logback:
+    rollingpolicy:
+      max-file-size: 20MB
+      max-history: 14
+      total-size-cap: 500MB

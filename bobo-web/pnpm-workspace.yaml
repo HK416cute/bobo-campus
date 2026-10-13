@@ -1,0 +1,10 @@
+# pnpm 11 的配置入口（pnpm 10+ 把部分设置从 .npmrc 迁到了这里，pnpm 会自动维护这个文件）。
+#
+# allowBuilds：显式声明哪些依赖允许执行安装期脚本。
+# pnpm 默认不跑依赖的 postinstall（供应链安全考虑），但：
+#   - esbuild 需要在安装时落地对应平台的二进制，不放行的话 vite build 直接失败；
+#   - vue-demi 需要按当前 Vue 版本切换入口文件。
+# 因此只放行这两个，其余依赖依旧不执行任何构建脚本。
+allowBuilds:
+  esbuild: true
+  vue-demi: true

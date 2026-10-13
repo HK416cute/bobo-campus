@@ -1,0 +1,8 @@
+# 后端构建上下文忽略规则：把无关文件挡在构建缓存之外，镜像构建更快
+target/
+data/
+*.log
+.mvn/
+.idea/
+mvnw
+mvnw.cmd

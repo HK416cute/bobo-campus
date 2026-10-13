@@ -1,0 +1,218 @@
+/* =============================================================================
+   bobo 校园二手 —— 全局样式与设计变量
+   配色参考闲鱼：主色是明黄 #ffd100，强调色是珊瑚红 #ff4d4f，底色是浅灰 #f5f6f8。
+   所有组件都通过 var(--bobo-*) 取色，改主题只需要改这一段。
+   ============================================================================= */
+
+:root {
+  --bobo-primary: #ffd100;
+  --bobo-primary-deep: #ffb400;
+  --bobo-primary-light: #fff8d6;
+  --bobo-accent: #ff4d4f;
+  --bobo-accent-light: #fff1f0;
+  --bobo-text: #1f2129;
+  --bobo-text-regular: #4a4d57;
+  --bobo-text-secondary: #8a8f99;
+  --bobo-text-placeholder: #b6bac2;
+  --bobo-bg: #f5f6f8;
+  --bobo-card: #ffffff;
+  --bobo-border: #eceef2;
+  --bobo-success: #17b26a;
+  --bobo-warning: #ff9f0a;
+  --bobo-radius: 12px;
+  --bobo-radius-lg: 18px;
+  --bobo-shadow: 0 2px 12px rgba(31, 33, 41, 0.06);
+  --bobo-shadow-hover: 0 8px 24px rgba(31, 33, 41, 0.12);
+  --bobo-max-width: 1180px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bobo-bg);
+  color: var(--bobo-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+/* 页面容器：前后台共用 */
+.bobo-container {
+  width: 100%;
+  max-width: var(--bobo-max-width);
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.bobo-page {
+  min-height: calc(100vh - 60px);
+  padding: 16px 0 32px;
+}
+
+/* 卡片 */
+.bobo-card {
+  background: var(--bobo-card);
+  border-radius: var(--bobo-radius);
+  box-shadow: var(--bobo-shadow);
+  padding: 16px;
+}
+
+.bobo-card + .bobo-card {
+  margin-top: 16px;
+}
+
+/* 标题 */
+.bobo-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 20px 0 12px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.bobo-section-title .more {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--bobo-text-secondary);
+  cursor: pointer;
+}
+
+.bobo-muted {
+  color: var(--bobo-text-secondary);
+}
+
+.bobo-price {
+  color: var(--bobo-accent);
+  font-weight: 700;
+}
+
+.bobo-price::before {
+  content: '¥';
+  font-size: 0.75em;
+  margin-right: 1px;
+}
+
+/* 主按钮：闲鱼标志性的黄色胶囊 */
+.bobo-btn-primary {
+  background: linear-gradient(135deg, var(--bobo-primary), var(--bobo-primary-deep));
+  border: none;
+  color: #1f2129;
+  font-weight: 600;
+  border-radius: 999px;
+}
+
+.bobo-btn-primary:hover {
+  filter: brightness(1.05);
+}
+
+/* 标签 */
+.bobo-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1;
+  background: var(--bobo-primary-light);
+  color: #8a6d00;
+}
+
+.bobo-tag.danger {
+  background: var(--bobo-accent-light);
+  color: var(--bobo-accent);
+}
+
+.bobo-tag.success {
+  background: #e8f8f0;
+  color: var(--bobo-success);
+}
+
+.bobo-tag.info {
+  background: #eef1f6;
+  color: var(--bobo-text-regular);
+}
+
+/* 空状态 */
+.bobo-empty {
+  padding: 48px 0;
+  text-align: center;
+  color: var(--bobo-text-secondary);
+}
+
+/* 文本省略 */
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ellipsis-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 滚动条（PC 上细一点更好看） */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d7dae0;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Element Plus 主题微调：把默认蓝换成 bobo 的黄 */
+:root {
+  --el-color-primary: #ffb400;
+  --el-color-danger: #ff4d4f;
+  --el-border-radius-base: 8px;
+}
+
+.el-button--primary {
+  --el-button-text-color: #1f2129;
+  font-weight: 600;
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .bobo-container {
+    padding: 0 12px;
+  }
+
+  .bobo-page {
+    padding: 12px 0 76px;
+  }
+}

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bobo.mapper.ReportMapper">
+
+    <resultMap id="ReportVOMap" type="com.bobo.domain.vo.SimpleVos$ReportVO">
+        <id     property="reportId"         column="report_id"/>
+        <result property="userId"           column="user_id"/>
+        <result property="reporterNickname" column="reporter_nickname"/>
+        <result property="targetType"       column="target_type"/>
+        <result property="targetId"         column="target_id"/>
+        <result property="targetTitle"      column="target_title"/>
+        <result property="reason"           column="reason"/>
+        <result property="detail"           column="detail"/>
+        <result property="status"           column="status"/>
+        <result property="handleRemark"     column="handle_remark"/>
+        <result property="handleByName"     column="handle_by_name"/>
+        <result property="handleTime"       column="handle_time"/>
+        <result property="createTime"       column="create_time"/>
+    </resultMap>
+
+    <!--
+      被举报对象摘要：商品取标题、用户取昵称、评价取内容。
+      用 CASE + 三个 LEFT JOIN 一次查完，避免每条举报再发 1 次查询。
+    -->
+    <select id="selectReportPage" resultMap="ReportVOMap">
+        SELECT r.report_id, r.user_id, ru.nickname AS reporter_nickname,
+               r.target_type, r.target_id,
+               CASE r.target_type
+                   WHEN 'item'   THEN ti.title
+                   WHEN 'user'   THEN tu.nickname
+                   WHEN 'review' THEN tr.content
+                   ELSE NULL
+               END AS target_title,
+               r.reason, r.detail, r.status, r.handle_remark,
+               hu.nickname AS handle_by_name, r.handle_time, r.create_time
+        FROM bobo_report r
+        LEFT JOIN bobo_user ru ON ru.user_id = r.user_id
+        LEFT JOIN bobo_user hu ON hu.user_id = r.handle_by
+        LEFT JOIN bobo_item ti ON r.target_type = 'item' AND ti.item_id = r.target_id
+        LEFT JOIN bobo_user tu ON r.target_type = 'user' AND tu.user_id = r.target_id
+        LEFT JOIN bobo_review tr ON r.target_type = 'review' AND tr.review_id = r.target_id
+        <where>
+            r.del_flag = 0
+            <if test="q.targetType != null and q.targetType != ''">
+                AND r.target_type = #{q.targetType}
+            </if>
+            <if test="q.status != null">
+                AND r.status = #{q.status}
+            </if>
+        </where>
+        ORDER BY r.status ASC, r.create_time DESC
+    </select>
+
+</mapper>

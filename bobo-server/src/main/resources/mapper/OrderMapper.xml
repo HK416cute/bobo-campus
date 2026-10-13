@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bobo.mapper.OrderMapper">
+
+    <!-- 注意：金额列用 BigDecimal 承接，OrderVO 内部提供了 BigDecimal 参数的 setter -->
+    <resultMap id="OrderVOMap" type="com.bobo.domain.vo.OrderVO">
+        <id     property="orderId"          column="order_id"/>
+        <result property="orderNo"          column="order_no"/>
+        <result property="itemId"           column="item_id"/>
+        <result property="itemTitle"        column="item_title"/>
+        <result property="itemCover"        column="item_cover"/>
+        <result property="price"            column="price"/>
+        <result property="quantity"         column="quantity"/>
+        <result property="totalAmount"      column="total_amount"/>
+        <result property="tradeType"        column="trade_type"/>
+        <result property="receiverInfo"     column="receiver_info"/>
+        <result property="tradePlace"       column="trade_place"/>
+        <result property="tradeTime"        column="trade_time"/>
+        <result property="remark"           column="remark"/>
+        <result property="logisticsCompany" column="logistics_company"/>
+        <result property="logisticsNo"      column="logistics_no"/>
+        <result property="status"           column="status"/>
+        <result property="cancelReason"     column="cancel_reason"/>
+        <result property="payTime"          column="pay_time"/>
+        <result property="deliverTime"      column="deliver_time"/>
+        <result property="finishTime"       column="finish_time"/>
+        <result property="createTime"       column="create_time"/>
+        <result property="buyerId"          column="buyer_id"/>
+        <result property="buyerNickname"    column="buyer_nickname"/>
+        <result property="buyerPhone"       column="buyer_phone"/>
+        <result property="sellerId"         column="seller_id"/>
+        <result property="sellerNickname"   column="seller_nickname"/>
+        <result property="sellerPhone"      column="seller_phone"/>
+        <result property="reviewed"         column="reviewed"/>
+    </resultMap>
+
+    <sql id="OrderColumns">
+        o.order_id, o.order_no, o.item_id, o.item_title, o.item_cover, o.price, o.quantity,
+        o.total_amount, o.trade_type, o.receiver_info, o.trade_place, o.trade_time, o.remark,
+        o.logistics_company, o.logistics_no, o.status, o.cancel_reason,
+        o.pay_time, o.deliver_time, o.finish_time, o.create_time,
+        o.buyer_id, bu.nickname AS buyer_nickname, bu.phone AS buyer_phone,
+        o.seller_id, su.nickname AS seller_nickname, su.phone AS seller_phone,
+        (SELECT COUNT(1) FROM bobo_review r
+          WHERE r.order_id = o.order_id AND r.from_id = #{currentUserId} AND r.del_flag = 0) AS reviewed
+    </sql>
+
+    <select id="selectOrderPage" resultMap="OrderVOMap">
+        SELECT
+        <include refid="OrderColumns"/>
+        FROM bobo_order o
+        LEFT JOIN bobo_user bu ON bu.user_id = o.buyer_id
+        LEFT JOIN bobo_user su ON su.user_id = o.seller_id
+        <where>
+            o.del_flag = 0
+            <!--
+              role 语义：
+                buy     我买到的（buyer_id = 当前用户）
+                sell    我卖出的（seller_id = 当前用户）
+                all     全部订单，**不按用户过滤**——仅管理端使用
+                        （/api/admin/orders 由拦截器保证只有管理员能访问，
+                          前台 /api/orders 会把 role 强制成 buy/sell）
+              这里曾经漏掉 all 分支：管理端传了哨兵 currentUserId = -1 走 otherwise，
+              结果被当成「买家或卖家 = -1」过滤，管理端订单列表永远是空的。
+            -->
+            <choose>
+                <when test="q.role == 'buy'">
+                    AND o.buyer_id = #{currentUserId}
+                </when>
+                <when test="q.role == 'sell'">
+                    AND o.seller_id = #{currentUserId}
+                </when>
+                <when test="q.role == 'all'">
+                    <!-- 管理端：不加用户维度条件 -->
+                </when>
+                <otherwise>
+                    AND (o.buyer_id = #{currentUserId} OR o.seller_id = #{currentUserId})
+                </otherwise>
+            </choose>
+            <if test="q.status != null">
+                AND o.status = #{q.status}
+            </if>
+            <if test="q.buyerId != null">
+                AND o.buyer_id = #{q.buyerId}
+            </if>
+            <if test="q.sellerId != null">
+                AND o.seller_id = #{q.sellerId}
+            </if>
+            <if test="q.keyword != null and q.keyword != ''">
+                AND (o.order_no LIKE CONCAT('%', #{q.keyword}, '%')
+                     OR o.item_title LIKE CONCAT('%', #{q.keyword}, '%'))
+            </if>
+        </where>
+        ORDER BY o.create_time DESC, o.order_id DESC
+    </select>
+
+    <select id="selectOrderDetail" resultMap="OrderVOMap">
+        SELECT
+        <include refid="OrderColumns"/>
+        FROM bobo_order o
+        LEFT JOIN bobo_user bu ON bu.user_id = o.buyer_id
+        LEFT JOIN bobo_user su ON su.user_id = o.seller_id
+        WHERE o.order_id = #{orderId} AND o.del_flag = 0
+    </select>
+
+</mapper>

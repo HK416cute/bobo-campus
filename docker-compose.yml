@@ -1,0 +1,146 @@
+# =============================================================================
+# bobo 校园二手交易平台 —— 一键部署编排
+#
+# 用法（项目根目录）：
+#   cp .env.example .env      # 修改 MYSQL_PASSWORD / BOBO_JWT_SECRET 等
+#   docker compose up -d --build
+#   浏览器打开 http://<服务器IP>/          前台
+#              http://<服务器IP>/admin     管理后台（admin / password）
+#
+# 说明：
+#   - MySQL 的建表与种子数据放在 ./mysql/init，容器「首次初始化数据目录」时自动执行；
+#     已有数据卷时不会重复执行，改 SQL 后需要 docker compose down -v 才能重来。
+#   - 上传目录用同一份 named volume 挂到后端与 nginx，两边路径一致，
+#       因此 nginx 用 alias 直接读文件，不需要请求绕过后端。
+#   - 容器名与卷名都可用 .env 覆盖（BOBO_CONTAINER_PREFIX / BOBO_VOLUME_PREFIX）。
+#     默认值 bobo-* 适合一台机器只跑这一套服务；如果同一台机器上还有别的 bobo 工程
+#     （例如门店系统的 bobo-mysql / bobo-server），请把这两项改成自己的前缀，
+#     否则 compose 只会在启动时报 name already in use。
+# =============================================================================
+
+name: bobo-campus
+
+services:
+  # ---------------------------------------------------------------- MySQL 8
+  bobo-mysql:
+    image: ${BOBO_MYSQL_IMAGE:-mysql:8.0}
+    container_name: ${BOBO_CONTAINER_PREFIX:-bobo}-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 中设置 MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-bobo}
+      MYSQL_USER: ${MYSQL_USERNAME:-bobo}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 中设置 MYSQL_PASSWORD}
+      TZ: ${TZ:-Asia/Shanghai}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+      - --lower_case_table_names=0
+      - --max_connections=300
+      # 8.0 默认的 caching_sha2_password 在部分老客户端上不兼容，
+      # 这里保持默认（Spring 的 mysql-connector-j 8.x 完全支持），不做降级。
+    volumes:
+      - bobo-mysql-data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      # 只在需要从外网连数据库时暴露；生产环境建议注释掉这一行，只走容器内网
+      - "${MYSQL_PORT:-3306}:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    networks:
+      - bobo-net
+
+  # ---------------------------------------------------------------- 后端
+  bobo-server:
+    build:
+      context: ./bobo-server
+      dockerfile: ../docker/bobo-server/Dockerfile
+      args:
+        # 留空 = 用 Docker Hub 官方镜像；国内可设为 docker.1ms.run/ 之类的镜像站前缀
+        REGISTRY: ${BOBO_REGISTRY:-}
+    image: bobo/bobo-server:1.0.0
+    container_name: ${BOBO_CONTAINER_PREFIX:-bobo}-server
+    restart: always
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      SERVER_PORT: 9080
+      SPRING_PROFILES_ACTIVE: prod
+      MYSQL_HOST: bobo-mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-bobo}
+      MYSQL_USERNAME: ${MYSQL_USERNAME:-bobo}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 中设置 MYSQL_PASSWORD}
+      BOBO_JWT_SECRET: ${BOBO_JWT_SECRET:?请在 .env 中设置 BOBO_JWT_SECRET}
+      BOBO_JWT_EXPIRE_MINUTES: ${BOBO_JWT_EXPIRE_MINUTES:-10080}
+      BOBO_ADMIN_REGISTER_CODE: ${BOBO_ADMIN_REGISTER_CODE:-}
+      BOBO_UPLOAD_PATH: /app/data/upload
+      BOBO_UPLOAD_URL_PREFIX: /upload
+      BOBO_LOG_PATH: /app/data/logs
+      BOBO_LOG_LEVEL: ${BOBO_LOG_LEVEL:-info}
+      # ---------------------------------------------------------------- AI 能力
+      # AI 是「可选增强」：BOBO_AI_API_KEY 为空时应用照常启动，com.bobo.ai 全层降级为规则实现
+      # （发布助手/检索解析仍可用，只是语义泛化弱）。真实 key 写在 .env 里，不要写进本文件。
+      # 注意 compose 的 ${VAR:-} 是「变量为空时用冒号后的默认值」，这里默认值为空 = 走降级模式。
+      BOBO_AI_ENABLED: ${BOBO_AI_ENABLED:-true}
+      BOBO_AI_API_KEY: ${BOBO_AI_API_KEY:-}
+      BOBO_AI_MODEL: ${BOBO_AI_MODEL:-deepseek-chat}
+      BOBO_AI_TIMEOUT_MS: ${BOBO_AI_TIMEOUT_MS:-15000}
+      # 限流与配额：防脚本刷接口烧穿 token 额度
+      BOBO_AI_GLOBAL_QPS: ${BOBO_AI_GLOBAL_QPS:-10}
+      BOBO_AI_USER_QPS: ${BOBO_AI_USER_QPS:-2}
+      BOBO_AI_DAILY_QUOTA: ${BOBO_AI_DAILY_QUOTA:-200}
+      # 元/百万 token，仅用于流水里估算成本，换模型时改这里不改代码
+      BOBO_AI_PRICE_INPUT: ${BOBO_AI_PRICE_INPUT:-2.0}
+      BOBO_AI_PRICE_OUTPUT: ${BOBO_AI_PRICE_OUTPUT:-8.0}
+      JAVA_OPTS: ${JAVA_OPTS:--Xms256m -Xmx512m -XX:+UseG1GC -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai}
+    volumes:
+      - bobo-upload:/app/data/upload
+      - bobo-logs:/app/data/logs
+    depends_on:
+      bobo-mysql:
+        condition: service_healthy
+    networks:
+      - bobo-net
+
+  # ---------------------------------------------------------------- 前端 + nginx
+  bobo-web:
+    build:
+      # 与后端一致：用仓库根当上下文，这样 Dockerfile 才能同时拿到
+      # bobo-web/ 源码与 docker/bobo-web/nginx/ 站点配置
+      context: .
+      dockerfile: docker/bobo-web/Dockerfile
+      args:
+        REGISTRY: ${BOBO_REGISTRY:-}
+    image: bobo/bobo-web:1.0.0
+    container_name: ${BOBO_CONTAINER_PREFIX:-bobo}-web
+    restart: always
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${WEB_PORT:-80}:80"
+    volumes:
+      # 上传卷与后端共享，nginx 直接读文件
+      - bobo-upload:/data/upload:ro
+      # 站点配置走挂载，改完 nginx -s reload 即可，不用重新构建镜像
+      - ./docker/bobo-web/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - bobo-server
+    networks:
+      - bobo-net
+
+volumes:
+  bobo-mysql-data:
+    name: ${BOBO_VOLUME_PREFIX:-bobo}-mysql-data
+  bobo-upload:
+    name: ${BOBO_VOLUME_PREFIX:-bobo}-upload
+  bobo-logs:
+    name: ${BOBO_VOLUME_PREFIX:-bobo}-logs
+
+networks:
+  bobo-net:
+    driver: bridge

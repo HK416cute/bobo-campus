@@ -1,0 +1,7 @@
+# 前端构建上下文忽略规则
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+.idea/
+.vscode/
