@@ -144,24 +144,25 @@ node bobo-web/scripts/probe-admin.mjs   # 需先设 BOBO_SITE=http://localhost/b
 首页 `http://<服务器IP>/` 应看到瀑布流、16 个分类、顶栏搜索与移动端底部导航；`http://<服务器IP>/admin`
 未登录会被路由守卫送到 `/admin/login`。演示账号 `admin`/`xiaoyu`/`lulu`/`tiedan`/`mianbao`，密码均为 `password`。
 
-> ⚠️ **已知问题**：`02-seed.sql` 存的是 BCrypt 散列，而后端 `PasswordEncoder` 只认 `pbkdf2$sha256$…`，
-> 因此按当前代码初始化后**演示账号无法登录**（提示「用户名或密码错误」）。两种临时处理：
+> ✅ **演示账号可直接登录**：`02-seed.sql` 里的散列已是后端 `PasswordEncoder` 认的 PBKDF2 格式
+> （`pbkdf2$sha256$120000$<salt>$<hash>`，与 `com.bobo.security.PasswordEncoder` 一致），
+> 不需要任何修复脚本。真伪一条命令即可验证：
 >
 > ```bash
-> python3 - <<'PY' > /tmp/fix.sql      # 为 "password" 生成 PBKDF2 散列（注意后端格式含 "$sha256$"）
-> import hashlib, base64, os
-> for uid in range(1, 6):
->     s = os.urandom(16); h = hashlib.pbkdf2_hmac("sha256", b"password", s, 120000, 32)
->     print("UPDATE bobo_user SET password='pbkdf2$sha256$120000$%s$%s' WHERE user_id=%d;"
->           % (base64.b64encode(s).decode(), base64.b64encode(h).decode(), uid))
-> PY
-> docker compose exec -T bobo-mysql mysql -ubobo -p"$(grep '^MYSQL_PASSWORD=' .env|cut -d= -f2-)" bobo < /tmp/fix.sql
-> # 方案 B：用注册接口新建账号（密码由后端自己 encode，必然可用）
+> curl -s -X POST http://127.0.0.1/api/auth/login -H 'Content-Type: application/json' \
+>   -d '{"username":"admin","password":"password"}' | head -c 200     # 应返回带 token 的 JSON
+> ```
+>
+> 若确实返回「用户名或密码错误」，按顺序查：① 是否连到了别的库（`MYSQL_DATABASE`）；
+> ② 是否手工改过 `bobo_user.password`；③ 后端日志里 `PasswordEncoder` 相关异常。
+> ⚠️ **生产环境必须立刻改掉 `admin` 的弱密码**（见 4.1）。
+>
+> 自己造账号还有一个永远可用的办法——走注册接口，密码由后端自己 encode：
+>
+> ```bash
 > curl -s -X POST http://127.0.0.1/api/auth/register -H 'Content-Type: application/json' \
 >   -d '{"username":"mymaster","password":"改成你的强密码","nickname":"站长"}'
 > ```
->
-> 生产环境不要保留 `password` 这种弱密码（见 4.1）。
 
 **业务链路验收**（建议 2 个浏览器或用无痕窗口），完整走一遍「发布 → 审核 → 下单 → 支付 → 评价」：
 **发布**：`xiaoyu` 登录 → 发布闲置，填标题/价格/分类/成色/交易方式/校区/地点，上传 1-9 图 → 提交成功，
@@ -177,7 +178,7 @@ node bobo-web/scripts/probe-admin.mjs   # 需先设 BOBO_SITE=http://localhost/b
 
 ## 四、安全加固
 
-**4.1 改掉演示账号密码**：先按第三节修好种子密码，再登录后台用「个人中心 → 修改密码」，或按第三节方案 A 生成新散列替换；同时停用用不到的演示号（逻辑删除值为 2），并把演示数据里写死的手机号 `1380000000x`、邮箱 `*@bobo.edu` 一并替换：
+**4.1 改掉演示账号密码**：种子账号本身可用（见第三节验证清单），登录后台用「个人中心 → 修改密码」改掉 `admin` 的 `password` 即可；同时停用用不到的演示号（逻辑删除值为 2），并把演示数据里写死的手机号 `1380000000x`、邮箱 `*@bobo.edu` 一并替换：
 `docker compose exec -T bobo-mysql mysql -ubobo -p"$(grep '^MYSQL_PASSWORD=' .env|cut -d= -f2-)" bobo -e "UPDATE bobo_user SET del_flag = 2 WHERE username IN ('xiaoyu','lulu','tiedan','mianbao');"`
 
 **4.2 不暴露 MySQL 端口**：把 `docker-compose.yml` 里 `bobo-mysql` 的 `ports` 段注释掉（改 `.env` 的 `MYSQL_PORT` 只换宿主机端口号，仍然对外监听）：
@@ -504,7 +505,8 @@ curl -s "http://127.0.0.1/api/admin/orders?role=all&pageNum=1&pageSize=10" -H "A
 | 变量 | `.env.example` 默认值 | 作用 | 生产建议 |
 |---|---|---|---|
 | `WEB_PORT` | `80` | `bobo-web` 容器 80 映射到宿主机的端口，站点入口 | 保持 80（前置 SLB/宿主 nginx 时也保持） |
-| `MYSQL_PORT` | `3306` | `bobo-mysql` 映射到宿主机的端口 | 把 compose 的 `ports` 段注释掉 |
+| `BOBO_WEB_BASE` | `/bobo-campus/` | 前端挂载的子路径（构建参数 `VITE_BASE`），改后**必须重建 bobo-web 镜像** | 与 nginx location 前缀保持一致；想挂根路径改成 `/` |
+| `MYSQL_PORT` | `3306` | `bobo-mysql` 映射到宿主机的端口 | **生产必须收口**：改成 `127.0.0.1:3306` 只绑本机回环（最省事），或把 compose 的 `ports` 段注释掉 |
 | `MYSQL_ROOT_PASSWORD` | `change-me-root-password` | MySQL root 密码，仅初始化与运维用；compose 用 `:?` 强制非空 | **必须 `openssl rand -base64 48`** |
 | `MYSQL_DATABASE` | `bobo` | 业务库名 | 保持 |
 | `MYSQL_USERNAME` | `bobo` | 后端使用的业务账号 | 保持 |
