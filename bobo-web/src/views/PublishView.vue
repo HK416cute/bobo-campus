@@ -7,6 +7,24 @@
           {{ isEdit ? '修改后会重新进入审核，审核通过后才会展示给买家' : '发布后需要管理员审核，通常几分钟内完成' }}
         </p>
 
+        <!--
+          待审核配额提示：同一用户最多同时挂 pendingLimit 件待审核商品（第 6 件会被后端拒绝）。
+          提前显示「还能发几件」，避免用户把表单填完才被拒——那种体验最差。
+        -->
+        <el-alert
+          v-if="!isEdit && quota.known"
+          class="quota-tip"
+          :type="quota.full ? 'error' : (quota.remaining <= 2 ? 'warning' : 'info')"
+          :closable="false"
+          show-icon
+          :title="quota.full
+            ? `你已有 ${quota.pending} 件商品在审核中，达到上限 ${quota.limit} 件`
+            : `审核中的商品 ${quota.pending}/${quota.limit} 件，还可以发布 ${quota.remaining} 件`"
+          :description="quota.full
+            ? '请等其中任意一件审核出结果（通过或驳回）后再发布新的闲置，名额会立即释放。'
+            : '只有「审核中」的商品占名额；在售、已售、已下架都不占用。'"
+        />
+
         <!-- AI 发布助手：只回填表单，不会自动提交。价格建议来自平台真实在售商品的价位分布。 -->
         <div v-if="!isEdit" class="ai-draft">
           <div class="ai-draft-head">
@@ -162,7 +180,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { MagicStick } from '@element-plus/icons-vue'
-import { aiApi, categoryApi, itemApi } from '@/api'
+import { aiApi, authApi, categoryApi, itemApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import ImageUploader from '@/components/ImageUploader.vue'
 import { CONDITION_OPTIONS } from '@/utils/format'
@@ -176,6 +194,38 @@ const conditions = CONDITION_OPTIONS
 const categories = ref([])
 const submitting = ref(false)
 const formRef = ref(null)
+
+/**
+ * 待审核配额（同一用户最多同时挂 5 件待审核商品）。
+ * 上限由后端下发（overview.pendingLimit），**不在前端写死**——
+ * 否则以后调限额要改两处，且很容易两边不一致。
+ * known=false 表示还没拿到数据，此时不显示提示（避免闪一个错误的数字）。
+ */
+const quota = reactive({
+  known: false,
+  pending: 0,
+  limit: 5,
+  remaining: 5,
+  full: false
+})
+
+async function loadQuota() {
+  if (isEdit.value) {
+    return
+  }
+  try {
+    const data = await authApi.overview()
+    const limit = Number(data?.pendingLimit ?? 5)
+    const pending = Number(data?.pendingCount ?? 0)
+    quota.limit = limit
+    quota.pending = pending
+    quota.remaining = Math.max(0, limit - pending)
+    quota.full = pending >= limit
+    quota.known = true
+  } catch (e) {
+    // 配额只是提示，拿不到就不显示，不打扰用户
+  }
+}
 
 const form = reactive({
   title: '',
@@ -216,6 +266,9 @@ onMounted(async () => {
   }
   if (isEdit.value) {
     await loadItem()
+  } else {
+    // 新发布时才需要配额提示
+    loadQuota()
   }
 })
 
@@ -460,6 +513,10 @@ function recordAiFeedback(itemId) {
 
 .ai-risk {
   margin-top: 12px;
+}
+
+.quota-tip {
+  margin-bottom: 16px;
 }
 
 .submit-row {

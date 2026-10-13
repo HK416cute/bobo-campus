@@ -43,6 +43,21 @@ public class ItemService {
     private static final int MAX_IMAGES = 9;
     private static final int SELLER_OTHER_LIMIT = 6;
 
+    /**
+     * 同一用户**同时挂着**的待审核商品上限。
+     *
+     * <p>原来的规则是 1（发一件就必须等它审完才能发下一件），对正常卖家太严：
+     * 整理一批闲置时会被反复拦住。改成 5 之后，正常连续发布不会被挡，
+     * 而脚本刷屏式灌商品依旧会被限制在这个数量内。
+     *
+     * <p>注意这是「待审核中的数量」上限，不是「总发布量」：只要审核出了结果
+     * （通过 / 驳回）或卖家下架，名额立即可复用。
+     *
+     * <p>{@code public} 是刻意的：{@code AuthService.overview()} 要把它回传给前端做提示，
+     * 让"上限"只有一个事实来源，避免前端/文档各写一个 5。
+     */
+    public static final int MAX_PENDING_ITEMS = 5;
+
     private final ItemMapper itemMapper;
     private final ItemImageMapper itemImageMapper;
     private final FavoriteMapper favoriteMapper;
@@ -113,8 +128,13 @@ public class ItemService {
         if (user != null && user.isBanned()) {
             throw BizException.forbidden("账号已被封禁，无法发布商品");
         }
-        if (hasPendingItem(userId)) {
-            throw new BizException("你还有商品正在审核中，请等待审核通过后再发布");
+        // 并发发布上限：同一用户最多同时挂 MAX_PENDING_ITEMS 件待审核商品。
+        // 语义是「待审核中的数量」而不是「总量」——只要上一件审核通过（或有结果）就不再占用名额，
+        // 所以正常卖家连续发几件不会被拦住，只有刷屏式灌商品才会被挡。
+        int pending = countPendingItems(userId);
+        if (pending >= MAX_PENDING_ITEMS) {
+            throw new BizException("你还有 " + pending + " 件商品在审核中，最多同时提交 "
+                    + MAX_PENDING_ITEMS + " 件，请等审核完成后再发布");
         }
 
         Item item = new Item();
@@ -388,11 +408,17 @@ public class ItemService {
         }
     }
 
-    /** 是否已有待审核商品（限制刷屏式发布） */
-    private boolean hasPendingItem(Long userId) {
+    /**
+     * 统计该用户当前「待审核」商品数量。
+     *
+     * <p>只数 {@code status = 0 待审核}，因此：
+     * · 审核通过 / 驳回 / 主动下架 / 已售 都不再占名额；
+     * · 与「总发布量」无关，正常卖家不会因为历史商品多而被限制。
+     */
+    private int countPendingItems(Long userId) {
         Long count = itemMapper.selectCount(Wrappers.<Item>lambdaQuery()
                 .eq(Item::getSellerId, userId)
                 .eq(Item::getStatus, Item.STATUS_PENDING));
-        return count != null && count > 0;
+        return count == null ? 0 : count.intValue();
     }
 }

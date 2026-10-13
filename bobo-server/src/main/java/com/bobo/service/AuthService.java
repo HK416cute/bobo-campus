@@ -180,13 +180,20 @@ public class AuthService {
     /** 个人中心概览（角标统计） */
     public Map<String, Object> overview() {
         Long userId = AuthContext.userId();
-        Map<String, Object> map = new HashMap<>(12);
+        Map<String, Object> map = new HashMap<>(14);
         map.put("itemCount", itemMapper.selectCount(
                 Wrappers.<Item>lambdaQuery().eq(Item::getSellerId, userId)));
         map.put("onSaleCount", itemMapper.selectCount(
                 Wrappers.<Item>lambdaQuery().eq(Item::getSellerId, userId).eq(Item::getStatus, Item.STATUS_ON_SALE)));
         map.put("soldCount", itemMapper.selectCount(
                 Wrappers.<Item>lambdaQuery().eq(Item::getSellerId, userId).eq(Item::getStatus, Item.STATUS_SOLD)));
+        // 待审核数量与上限：前端据此提示「还能发几件」，避免用户填完表单才被拒。
+        // 这里**直接用 itemMapper 查**而不是调 ItemService：
+        // ItemService 依赖 NotificationService、后者又依赖 AuthService，
+        // 从 AuthService 反向注入 ItemService 会构成构造期循环依赖（得靠 @Lazy 绕，更脆）。
+        // 两处口径必须一致（都只数 status=0 待审核），由 ItemPublishLimitTest 断言锁住。
+        map.put("pendingCount", countPendingItems(userId));
+        map.put("pendingLimit", ItemService.MAX_PENDING_ITEMS);
         map.put("orderBuyCount", orderMapper.selectCount(
                 Wrappers.<Order>lambdaQuery().eq(Order::getBuyerId, userId)));
         map.put("orderSellCount", orderMapper.selectCount(
@@ -199,6 +206,17 @@ public class AuthService {
                         .eq(Notice::getIsRead, 0)
                         .and(w -> w.eq(Notice::getUserId, userId).or().eq(Notice::getUserId, Notice.USER_ALL))));
         return map;
+    }
+
+    /**
+     * 统计该用户「待审核」商品数量。
+     * 口径与 {@code ItemService.countPendingItems} 保持一致（都只数 {@code status = 0}）。
+     */
+    private int countPendingItems(Long userId) {
+        Long count = itemMapper.selectCount(Wrappers.<Item>lambdaQuery()
+                .eq(Item::getSellerId, userId)
+                .eq(Item::getStatus, Item.STATUS_PENDING));
+        return count == null ? 0 : count.intValue();
     }
 
     /** 用户公开信息，不存在时抛 404 */

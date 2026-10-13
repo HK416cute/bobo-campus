@@ -208,8 +208,15 @@ Jackson 与 `jakarta.validation` 都支持在 record 组件上标注（如 `@Not
                                                   └─本人重新上架─▶ 0 待审核
 ```
 
-**商品审核流转**：`publish()` 强制 `status = STATUS_PENDING`，并限制「已有待审核商品时不能再发布」
-（`hasPendingItem`，防刷屏灌商品）；`audit()` 写 `status`、`reject_reason`、`audit_time`、`audit_by`
+**商品审核流转**：`publish()` 强制 `status = STATUS_PENDING`，并限制**同一用户同时最多挂
+`MAX_PENDING_ITEMS = 5` 件待审核商品**（`countPendingItems`，防刷屏灌商品）。
+这里有两个刻意的语义选择：
+①限制的是「**待审核中的数量**」，不是「历史总发布量」——只要审核出结果（通过/驳回）
+或卖家下架，名额立即复用，所以正常卖家整理一批闲置连发几件不会被拦；
+②额度之外仍允许编辑已发布的商品（编辑只是重新进入待审核，不新增商品）。上限值
+`ItemService.MAX_PENDING_ITEMS` 是 `public` 的，由 `AuthService.overview()` 回传给前端做
+「还能发几件」提示，保证这个数字只有一个事实来源。
+`audit()` 写 `status`、`reject_reason`、`audit_time`、`audit_by`
 并发 `type=audit` 通知，**驳回必须填原因**（`reason` 为空直接抛异常）；管理员 `offShelfByAdmin` 把原因写入
 `reject_reason` 并通知卖家，`onShelfByAdmin` 直接放回在售（相信管理员判断，不再走审核）；
 `batchAudit`/`batchOffShelf` 循环处理、逐条通知、返回处理条数。
