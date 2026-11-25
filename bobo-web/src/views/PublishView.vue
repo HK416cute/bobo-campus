@@ -76,6 +76,71 @@
           />
         </div>
 
+        <!-- AI 视觉估价：卖家上传图片后，由 DeepSeek 多模态模型判断成色并给出价位区间。
+             只回填表单，最终是否采用由卖家点按钮决定，系统不自动改价。 -->
+        <div class="ai-pricing">
+          <div class="ai-pricing-head">
+            <span class="ai-draft-title">
+              <el-icon><PictureFilled /></el-icon>
+              AI 看图估价
+            </span>
+            <span class="ai-draft-hint">
+              基于实物图判断成色，并结合平台同类在售与近期成交价给出区间
+            </span>
+          </div>
+          <div class="ai-draft-actions">
+            <el-button
+              type="primary"
+              plain
+              :loading="pricingLoading"
+              :disabled="!form.images.length"
+              @click="estimatePrice"
+            >
+              {{ pricingLoading ? '正在看图…' : (priceEstimate ? '重新估价' : '帮我估价') }}
+            </el-button>
+            <span v-if="!form.images.length" class="ai-draft-hint">先上传至少一张实物图</span>
+            <span v-else-if="pricingNote" class="ai-draft-note">{{ pricingNote }}</span>
+          </div>
+
+          <div v-if="priceEstimate" class="ai-price-estimate">
+            <div class="estimate-line">
+              <el-tag effect="light" round>{{ priceEstimate.conditionGrade }}</el-tag>
+              <span v-if="priceEstimate.priceMid" class="estimate-range">
+                ¥{{ priceEstimate.priceLow }} ~ <b>¥{{ priceEstimate.priceMid }}</b> ~ ¥{{ priceEstimate.priceHigh }}
+              </span>
+              <span v-else class="bobo-muted">同类样本不足，暂无法给出可靠价格区间</span>
+              <span class="estimate-source">
+                {{ priceEstimate.source === 'model' ? 'DeepSeek 视觉评估' : '规则推算' }}
+              </span>
+            </div>
+            <div class="estimate-meta">
+              参考 {{ priceEstimate.sampleCount }} 条同类样本
+              <span v-if="priceEstimate.basis"> · {{ priceEstimate.basis }}</span>
+              <span v-if="priceEstimate.confidence != null"> · 置信度 {{ Math.round(Number(priceEstimate.confidence) * 100) }}%</span>
+            </div>
+            <ul v-if="priceEstimate.reasons?.length" class="estimate-reasons">
+              <li v-for="(reason, index) in priceEstimate.reasons" :key="index">{{ reason }}</li>
+            </ul>
+            <div class="estimate-actions">
+              <el-button
+                v-if="priceEstimate.priceMid"
+                type="primary"
+                size="small"
+                @click="applyPriceEstimate"
+              >
+                采用建议（¥{{ priceEstimate.priceMid }} / {{ priceEstimate.conditionGrade }}）
+              </el-button>
+              <el-button v-else size="small" @click="applyConditionEstimate">
+                采用成色建议（{{ priceEstimate.conditionGrade }}）
+              </el-button>
+              <span v-if="adoptedEstimateId" class="adopted-tip">
+                <el-icon><CircleCheckFilled /></el-icon>
+                已采用{{ adoptedEstimateId === priceEstimate.estimateId ? '本次' : '上一次' }}估价
+              </span>
+            </div>
+          </div>
+        </div>
+
         <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
           <el-form-item label="宝贝图片" prop="images">
             <ImageUploader v-model="form.images" />
@@ -176,10 +241,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { MagicStick } from '@element-plus/icons-vue'
+import { CircleCheckFilled, MagicStick, PictureFilled } from '@element-plus/icons-vue'
 import { aiApi, authApi, categoryApi, itemApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import ImageUploader from '@/components/ImageUploader.vue'
@@ -237,7 +302,9 @@ const form = reactive({
   tradeType: 0,
   campus: '',
   location: '',
-  images: []
+  images: [],
+  /** 卖家采纳的 AI 估价ID；未采纳为 null，后端不会写入任何 AI 建议 */
+  aiEstimateId: null
 })
 
 const rules = {
@@ -398,6 +465,74 @@ function applyAiPrice() {
   }
 }
 
+// ------------------------------------------------------------------ AI 视觉估价（DeepSeek 多模态）
+const pricingLoading = ref(false)
+const priceEstimate = ref(null)
+const pricingNote = ref('')
+const adoptedEstimateId = ref(null)
+
+/** 换图后旧估价立即失效：模型看的是上一组图，继续沿用会误导卖家 */
+watch(
+  () => form.images,
+  () => {
+    priceEstimate.value = null
+    pricingNote.value = ''
+    form.aiEstimateId = null
+    adoptedEstimateId.value = null
+  },
+  { deep: true }
+)
+
+async function estimatePrice() {
+  if (!form.images.length) {
+    ElMessage.info('先上传至少一张实物图')
+    return
+  }
+  pricingLoading.value = true
+  try {
+    const result = await aiApi.estimatePricing({
+      title: form.title,
+      description: form.description,
+      categoryId: form.categoryId || null,
+      conditionLevel: form.conditionLevel,
+      images: form.images.slice(0, 3),
+      askingPrice: form.price || null
+    })
+    priceEstimate.value = result
+    pricingNote.value = result.source === 'rule'
+      ? `当前为规则估算：${result.degradeNote || '未启用多模态模型'}`
+      : ''
+    adoptedEstimateId.value = null
+  } catch (e) {
+    // 提示由 http.js 统一处理
+  } finally {
+    pricingLoading.value = false
+  }
+}
+
+function applyPriceEstimate() {
+  const estimate = priceEstimate.value
+  if (!estimate?.priceMid) {
+    return
+  }
+  form.price = Number(estimate.priceMid)
+  form.conditionLevel = estimate.conditionGrade
+  form.aiEstimateId = estimate.estimateId
+  adoptedEstimateId.value = estimate.estimateId
+  ElMessage.success('已采用 AI 建议，可继续微调后再发布')
+}
+
+function applyConditionEstimate() {
+  const estimate = priceEstimate.value
+  if (!estimate) {
+    return
+  }
+  form.conditionLevel = estimate.conditionGrade
+  form.aiEstimateId = estimate.estimateId
+  adoptedEstimateId.value = estimate.estimateId
+  ElMessage.success('已采用 AI 成色建议')
+}
+
 /**
  * 采纳反馈：把「模型建议」与「用户最终提交」一起上报。
  * 这是采纳率指标的来源——没有它，"采纳率"只能靠估。
@@ -513,6 +648,78 @@ function recordAiFeedback(itemId) {
 
 .ai-risk {
   margin-top: 12px;
+}
+
+/* ---------------------------------------------------------------- AI 视觉估价 */
+.ai-pricing {
+  margin-bottom: 20px;
+  padding: 14px;
+  border: 1px dashed var(--el-color-success-light-5);
+  border-radius: 8px;
+  background: var(--el-color-success-light-9);
+}
+
+.ai-pricing-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.ai-price-estimate {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 13px;
+}
+
+.estimate-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.estimate-range {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--el-color-danger);
+}
+
+.estimate-source {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.estimate-meta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.estimate-reasons {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--el-text-color-regular);
+  line-height: 1.7;
+}
+
+.estimate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.adopted-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--el-color-success);
+  font-size: 12px;
 }
 
 .quota-tip {

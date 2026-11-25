@@ -55,6 +55,9 @@ public class Order implements Serializable {
     private Long buyerId;
     private Long sellerId;
 
+    /** 关联的智能撮合单ID；普通下单为 NULL（技术升级模块一） */
+    private Long matchId;
+
     /** 下单时的商品快照，避免商品被改价后订单信息失真 */
     private String itemTitle;
     private String itemCover;

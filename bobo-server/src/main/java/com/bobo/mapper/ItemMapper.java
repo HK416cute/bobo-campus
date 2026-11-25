@@ -101,6 +101,27 @@ public interface ItemMapper extends BaseMapper<Item> {
     List<java.math.BigDecimal> selectOnSalePrices(@Param("categoryId") Long categoryId,
                                                   @Param("limit") int limit);
 
+    /**
+     * 某分类近期真实成交价（已完成订单），供视觉定价的历史成交上下文。
+     *
+     * <p>取 {@code bobo_order.price} 而不是 {@code bobo_item.price}：
+     * 商品可能在成交后被改价，订单里的才是真实成交价。只取已完成（status=4），
+     * 取消/退款订单不计入，避免把无效交易当成行情。
+     */
+    @Select("""
+            SELECT o.price
+              FROM bobo_order o
+              JOIN bobo_item i ON i.item_id = o.item_id
+             WHERE o.del_flag = 0 AND o.status = 4
+               AND o.finish_time >= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               AND i.category_id = #{categoryId}
+             ORDER BY o.finish_time DESC
+             LIMIT #{limit}
+            """)
+    List<java.math.BigDecimal> selectSoldPrices(@Param("categoryId") Long categoryId,
+                                                @Param("days") int days,
+                                                @Param("limit") int limit);
+
     /** 全站在售商品的价格样本，供自然语言检索理解"这个平台大概什么价位" */
     @Select("""
             SELECT price FROM bobo_item

@@ -4,8 +4,8 @@
 # 用法（项目根目录）：
 #   cp .env.example .env      # 修改 MYSQL_PASSWORD / BOBO_JWT_SECRET 等
 #   docker compose up -d --build
-#   浏览器打开 http://<服务器IP>/          前台
-#              http://<服务器IP>/admin     管理后台（admin / password）
+#   浏览器打开 http://<服务器IP>/bobo-campus/          前台
+#              http://<服务器IP>/bobo-campus/admin     管理后台（admin / password）
 #
 # 说明：
 #   - MySQL 的建表与种子数据放在 ./mysql/init，容器「首次初始化数据目录」时自动执行；
@@ -88,8 +88,16 @@ services:
       # 注意 compose 的 ${VAR:-} 是「变量为空时用冒号后的默认值」，这里默认值为空 = 走降级模式。
       BOBO_AI_ENABLED: ${BOBO_AI_ENABLED:-true}
       BOBO_AI_API_KEY: ${BOBO_AI_API_KEY:-}
-      BOBO_AI_MODEL: ${BOBO_AI_MODEL:-deepseek-chat}
+      BOBO_AI_BASE_URL: ${BOBO_AI_BASE_URL:-https://api.deepseek.com}
+      BOBO_AI_MODEL: ${BOBO_AI_MODEL:-deepseek-flash}
       BOBO_AI_TIMEOUT_MS: ${BOBO_AI_TIMEOUT_MS:-15000}
+      # 多模态（视觉定价）与智能撮合：与文本共用同一套 Key
+      BOBO_AI_VISION_ENABLED: ${BOBO_AI_VISION_ENABLED:-true}
+      BOBO_AI_VISION_MODEL: ${BOBO_AI_VISION_MODEL:-deepseek-flash}
+      BOBO_AI_VISION_MAX_TOKENS: ${BOBO_AI_VISION_MAX_TOKENS:-900}
+      BOBO_AI_VISION_TIMEOUT_MS: ${BOBO_AI_VISION_TIMEOUT_MS:-30000}
+      BOBO_AI_MATCH_ROUNDS: ${BOBO_AI_MATCH_ROUNDS:-3}
+      BOBO_AI_MATCH_TIMEOUT_MS: ${BOBO_AI_MATCH_TIMEOUT_MS:-30000}
       # 限流与配额：防脚本刷接口烧穿 token 额度
       BOBO_AI_GLOBAL_QPS: ${BOBO_AI_GLOBAL_QPS:-10}
       BOBO_AI_USER_QPS: ${BOBO_AI_USER_QPS:-2}

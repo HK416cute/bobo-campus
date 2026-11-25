@@ -73,8 +73,9 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1/api/categories     # 2
 `curl -fs http://127.0.0.1:9080/v3/api-docs`，`start_period 60s`，并用 `depends_on: service_healthy` 等 MySQL）；
 `bobo-web` 为 `Up`（部分版本显示 `healthy`，镜像内探测 `/healthz`）。
 **首次启动会发生什么**：① `bobo-mysql` 数据目录（卷 `bobo-mysql-data`）为空 → 官方镜像按文件名顺序执行
-`/docker-entrypoint-initdb.d`：`01-schema.sql` 建 12 张表，`02-seed.sql` 写入 16 个分类、6 个演示账号与
-商品/订单/评价/公告/举报，`03-ai.sql` 建 AI 的 3 张表，`04-seed-ai.sql` 写入 AI 演示数据（采纳反馈与调用流水）；
+`/docker-entrypoint-initdb.d`：`01-schema.sql` 建 12 张基础表，`02-seed.sql` 写入 16 个分类与
+`admin`/`HK416` 两个账号（**不生成商品、订单、评价、公告等演示数据**），`03-ai.sql` 建 AI 的 3 张表，
+`05-ai-setting.sql` 建运行配置表，`06-ai-upgrade.sql` 建撮合/定价/知识库表与知识库种子；
 字符集由 compose `command` 固定 `utf8mb4`/`utf8mb4_unicode_ci`、时区 `+08:00`。
 ② `bobo-server` 等 MySQL healthy 后启动：建 Hikari 连接池、校验 JWT 密钥长度、准备 `/app/data/upload` 与 `/app/data/logs`。
 ③ `bobo-web` 启动 nginx，把 `bobo-upload` 卷只读挂到 `/data/upload`，站点配置挂到 `/etc/nginx/conf.d/default.conf`。
@@ -91,18 +92,74 @@ docker compose exec -T bobo-mysql mysql -ubobo -p"$PW" --default-character-set=u
 # 运行期配置表（后台「AI 运营 → 模型配置」保存到这张表；不建表则只能靠环境变量）
 docker compose exec -T bobo-mysql mysql -ubobo -p"$PW" --default-character-set=utf8mb4 bobo \
   < mysql/init/05-ai-setting.sql
-# 可选：AI 演示数据（让后台面板一进去就有数）
+# 可选：AI 演示数据（已移到 mysql/demo，不会被首次启动自动执行）
 docker compose exec -T bobo-mysql mysql -ubobo -p"$PW" --default-character-set=utf8mb4 bobo \
-  < mysql/init/04-seed-ai.sql
+  < mysql/demo/04-seed-ai-demo.sql
+
+# 技术升级：智能定价 / 撮合 / 知识库表 + 种子文档（幂等，可重复执行）
+docker compose exec -T bobo-mysql mysql -ubobo -p"$PW" --default-character-set=utf8mb4 bobo \
+  < mysql/init/06-ai-upgrade.sql
 
 # 2) 重建并重启两个镜像（子路径与配置页都在这一版里）
 docker compose up -d --build --no-deps bobo-server bobo-web
 ```
 
+**本次技术升级新增**（详见 [ai-upgrade.md](ai-upgrade.md)）：
+智能撮合 `bobo_match_request/message`、视觉定价 `bobo_price_estimate`、
+RAG 知识库 `bobo_knowledge_doc/chunk`、商品 `ai_*` 字段与订单 `match_id`。
+服务启动时若知识库只有文档、没有切片，会自动建一次索引；也可在
+「AI 运营 → 技术升级」点「重建索引」。
+
 **AI 配置怎么填**：登录管理后台 →「AI 运营」→「模型配置」→ 填 API Key →
 点「测试连通性」确认可用 → 点「保存并生效」（**不重启容器**）。
+文本模型建议 `deepseek-flash`（同时支持图像理解），需要更强推理可用 `deepseek-v4-pro`。
+视觉定价复用同一份 Key，模型由 `BOBO_AI_VISION_MODEL` 决定（默认 `deepseek-flash`）。
 也可以继续用环境变量 `BOBO_AI_API_KEY`：**配置表里有值以配置表为准，表里为空则回落环境变量**，
 所以首次部署只注入环境变量即可用，之后想改再进后台。
+
+### 2.1.1 初始化数据与演示账号（云部署必读）
+
+MySQL 官方镜像只会在**数据目录为空**时执行 `mysql/init/*.sql`，顺序为：
+
+| 脚本 | 自动生成的内容 |
+|---|---|
+| `01-schema.sql` | 12 张基础表 |
+| `02-seed.sql` | **仅** 16 个分类 + `admin`（bobo管理员）+ `2330090307`（HK416）两个账号 |
+| `03-ai.sql` | AI 流水 / 反馈 / 审核 3 张表 |
+| `05-ai-setting.sql` | AI 运行配置单行表（Key 为空） |
+| `06-ai-upgrade.sql` | 撮合 / 定价 / 知识库表、商品与订单扩展字段、3 篇知识库种子文档 |
+
+因此：
+
+- **全新服务器 + 空数据卷**：默认生成的是**干净站点**，不会出现商品、订单、评价、公告、私信、演示账号；
+- **已有数据卷**：初始化脚本不会重跑，只会保留现有数据；升级时需手动执行 `06-ai-upgrade.sql`；
+- `HK416`（username `2330090307`）现在已包含在 `02-seed.sql` 中，全新部署会保留这个账号；
+- 旧版完整演示数据已移到 `mysql/demo/`，**不会被 Docker 首次启动自动执行**。
+
+如果已有旧数据卷、想清成“只有 admin/HK416、无商品订单”的状态：
+
+```bash
+docker compose exec -T bobo-mysql sh -c 'mysql -ubobo -p"$MYSQL_PASSWORD" --default-character-set=utf8mb4 bobo' < mysql/fix/reset-business-data.sql
+```
+
+该脚本保留分类、AI 配置、知识库文档/切片，只清业务数据。
+对于**全新空卷**，默认的 `02-seed.sql` 已经是干净种子，不需要再执行这个 reset 脚本。
+
+需要完整演示数据时，只建议在**本地手工建库**时使用：
+
+```bash
+# 只执行 01-schema，然后用 demo seed 替代 init/02-seed.sql（不要两者都导入）
+mysql -uroot -p bobo < mysql/init/01-schema.sql
+mysql -uroot -p bobo < mysql/demo/02-seed-demo.sql
+mysql -uroot -p bobo < mysql/init/03-ai.sql
+mysql -uroot -p bobo < mysql/init/05-ai-setting.sql
+mysql -uroot -p bobo < mysql/init/06-ai-upgrade.sql
+# 可选：AI 演示流水
+mysql -uroot -p bobo < mysql/demo/04-seed-ai-demo.sql
+```
+
+Docker 首次启动会自动执行干净的 `02-seed.sql`；不要在它之后再导入 demo seed（两者都写
+`bobo_user`，会主键冲突）。
 
 ### 2.2 站点路径：默认挂在 /bobo-campus/ 下
 
@@ -135,16 +192,16 @@ node bobo-web/scripts/probe-admin.mjs   # 需先设 BOBO_SITE=http://localhost/b
 若在售商品过少它会明确 SKIP 而不是误报失败）。
 
 **不配 key 也可以先上**：`BOBO_AI_API_KEY` 为空且配置表里也没填时，应用正常启动，
-`/api/ai/status` 返回 `{"available":false,"degraded":true}`，
-发布助手与检索解析仍可用（结果标注「规则推算」）。
+`/api/ai/status` 返回 `{"available":false,"degraded":true}`；
+发布助手、检索解析、**视觉定价、智能撮合、知识库问答**都仍可用（结果标注「规则推算 / 规则摘录」）。
 
 
 ## 三、验证清单
 
-首页 `http://<服务器IP>/` 应看到瀑布流、16 个分类、顶栏搜索与移动端底部导航；`http://<服务器IP>/admin`
-未登录会被路由守卫送到 `/admin/login`。演示账号 `admin`/`xiaoyu`/`lulu`/`tiedan`/`mianbao`，密码均为 `password`。
+首页 `http://<服务器IP>/bobo-campus/` 应看到瀑布流、16 个分类、顶栏搜索与移动端底部导航；`http://<服务器IP>/bobo-campus/admin`
+未登录会被路由守卫送到 `/admin/login`。初始化账号只有 `admin`（密码 `password`）和 `2330090307`（HK416，初始密码同为 `password`，**上线后立即修改**）；`xiaoyu`/`lulu` 等演示账号只存在于可选的 `mysql/demo/02-seed-demo.sql`。
 
-> ✅ **演示账号可直接登录**：`02-seed.sql` 里的散列已是后端 `PasswordEncoder` 认的 PBKDF2 格式
+> ✅ **初始化账号可直接登录**：`02-seed.sql` 里的散列已是后端 `PasswordEncoder` 认的 PBKDF2 格式
 > （`pbkdf2$sha256$120000$<salt>$<hash>`，与 `com.bobo.security.PasswordEncoder` 一致），
 > 不需要任何修复脚本。真伪一条命令即可验证：
 >
@@ -165,9 +222,10 @@ node bobo-web/scripts/probe-admin.mjs   # 需先设 BOBO_SITE=http://localhost/b
 > ```
 
 **业务链路验收**（建议 2 个浏览器或用无痕窗口），完整走一遍「发布 → 审核 → 下单 → 支付 → 评价」：
-**发布**：`xiaoyu` 登录 → 发布闲置，填标题/价格/分类/成色/交易方式/校区/地点，上传 1-9 图 → 提交成功，
+干净库只有 `admin` 和 HK416，先注册一个测试卖家与一个测试买家；如果导入了 `mysql/demo/02-seed-demo.sql`，也可以直接用 `xiaoyu`/`lulu`。
+**发布**：测试卖家登录 → 发布闲置，填标题/价格/分类/成色/交易方式/校区/地点，上传 1-9 图 → 提交成功，
 「我的发布」显示 `待审核`，图片当场可预览（说明 `/upload/**` 已通）。**审核**：管理员 → 商品管理 → 通过（或驳回并填原因）
-→ 状态变 `在售`（或 `已驳回` 且带原因），卖家收到审核通知。**下单**：`lulu` 登录 → 商品详情 → 下单（当面填地点时间；
+→ 状态变 `在售`（或 `已驳回` 且带原因），卖家收到审核通知。**下单**：测试买家登录 → 商品详情 → 下单（当面填地点时间；
 邮寄先加收货地址）→ 跳订单详情，商品变 `已售`，卖家收到通知。**支付**：订单详情点「去支付」→ 当面交易直接到 `待评价`，
 邮寄到 `待发货`；**发货/收货**（仅邮寄）：卖家填快递公司 + 单号发货 → `待收货`，买家确认收货 → `待评价`。
 **评价**：双方各评一次（1-5 星 + 内容）→ 评价出现在商品与用户主页，被评方信用分按 4-5 星 +1、1-2 星 -1 变化。
@@ -178,7 +236,9 @@ node bobo-web/scripts/probe-admin.mjs   # 需先设 BOBO_SITE=http://localhost/b
 
 ## 四、安全加固
 
-**4.1 改掉演示账号密码**：种子账号本身可用（见第三节验证清单），登录后台用「个人中心 → 修改密码」改掉 `admin` 的 `password` 即可；同时停用用不到的演示号（逻辑删除值为 2），并把演示数据里写死的手机号 `1380000000x`、邮箱 `*@bobo.edu` 一并替换：
+**4.1 改掉 admin 弱密码**：初始化种子里的 `admin` 密码是 `password`，登录后台用「个人中心 → 修改密码」改掉即可。
+
+如果导入过 `mysql/demo/02-seed-demo.sql`，同步停用用不到的演示号（逻辑删除值为 2）并替换演示手机号/邮箱：
 `docker compose exec -T bobo-mysql mysql -ubobo -p"$(grep '^MYSQL_PASSWORD=' .env|cut -d= -f2-)" bobo -e "UPDATE bobo_user SET del_flag = 2 WHERE username IN ('xiaoyu','lulu','tiedan','mianbao');"`
 
 **4.2 不暴露 MySQL 端口**：把 `docker-compose.yml` 里 `bobo-mysql` 的 `ports` 段注释掉（改 `.env` 的 `MYSQL_PORT` 只换宿主机端口号，仍然对外监听）：
@@ -365,9 +425,9 @@ docker run --rm -v bobo-upload:/data/upload -v /opt/bobo-backup:/backup \       
 *处理*（⚠️ 会丢数据，先备份）：按顺序执行 `bash /opt/bobo-backup/backup.sh`、`docker compose down`、
 `docker volume rm bobo_mysql-data`（只删库卷、不动图片卷，效果等同 `down -v` 但更可控）、`docker compose up -d --build`，
 再用 `docker compose logs -f bobo-mysql` 确认出现 `Initializing database` 与脚本执行日志。
-只改种子数据、不想动表结构时更安全：直接打进现有库——
-`docker compose exec -T bobo-mysql mysql -ubobo -p"$PW" --default-character-set=utf8mb4 bobo < mysql/init/02-seed.sql`
-（该文件用 `DELETE FROM` + `INSERT`，会清掉对应表的演示数据）。
+只改种子数据、不想动表结构时，不要直接向已有库重放 `02-seed.sql`（会与已有主键冲突）；
+旧库清理用 `mysql/fix/reset-business-data.sql`，或按实际数据手工 `UPDATE`。
+（`02-seed.sql` 是给**空库**用的干净种子：16 个分类 + admin/HK416。）
 
 **7.3 前端刷新 `/admin/items` 报 404**
 *现象*：站内点击能进后台，但刷新或直接粘贴 `http://<IP>/admin/items` 得到 nginx 404。

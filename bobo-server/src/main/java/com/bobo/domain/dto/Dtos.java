@@ -141,7 +141,10 @@ public final class Dtos {
             String location,
 
             @Schema(description = "图片URL列表，第一张作为封面")
-            List<String> images
+            List<String> images,
+
+            @Schema(description = "卖家采纳的 AI 估价ID；为空表示不使用 AI 建议")
+            Long aiEstimateId
     ) {
     }
 
@@ -173,7 +176,10 @@ public final class Dtos {
 
             @Schema(description = "约定交易时间") LocalDateTime tradeTime,
 
-            @Size(max = 200, message = "备注最长 200 个字符") String remark
+            @Size(max = 200, message = "备注最长 200 个字符") String remark,
+
+            @Schema(description = "智能撮合单ID：传入时按撮合达成价下单，并由服务端校验双方确认状态")
+            Long matchId
     ) {
     }
 
@@ -411,6 +417,65 @@ public final class Dtos {
     public record AiTestDTO(
             @Schema(description = "临时用这个模型名测试，留空用已保存的")
             @Size(max = 100, message = "模型名过长") String model
+    ) {
+    }
+
+    // ================================================================== 技术升级
+
+    @Schema(description = "AI 视觉定价与成色评估请求（发布前或编辑时调用）")
+    public record PriceEstimateDTO(
+            @Schema(description = "标题") @Size(max = 100, message = "标题最长 100 个字符") String title,
+            @Schema(description = "描述") @Size(max = 2000, message = "描述最长 2000 个字符") String description,
+            @Schema(description = "分类ID") Long categoryId,
+            @Schema(description = "卖家自述成色，作为参考") @Size(max = 16) String conditionLevel,
+            @Schema(description = "图片URL列表（最多取前 3 张送模型）")
+            @Size(max = 9, message = "最多 9 张图片") List<String> images,
+            @Schema(description = "卖家心理价，仅作参考，不参与强制约束")
+            @DecimalMin(value = "0.01", message = "心理价必须大于 0") BigDecimal askingPrice
+    ) {
+    }
+
+    @Schema(description = "RAG 知识库问答")
+    public record AiQaDTO(
+            @Schema(description = "问题", example = "买到假货怎么办？流程是什么？")
+            @NotBlank(message = "请输入问题")
+            @Size(max = 300, message = "问题最长 300 个字符") String question
+    ) {
+    }
+
+    @Schema(description = "发起智能撮合：买家给出预算与诉求，两个 Agent 多轮协商")
+    public record MatchCreateDTO(
+            @Schema(description = "目标商品ID") @NotNull(message = "缺少商品ID") Long itemId,
+
+            @Schema(description = "预算下限（元），可空")
+            @DecimalMin(value = "0.01", message = "预算必须大于 0") BigDecimal budgetMin,
+
+            @Schema(description = "预算上限（元），可空；为空时按商品价的 90% 估算")
+            @DecimalMin(value = "0.01", message = "预算必须大于 0") BigDecimal budgetMax,
+
+            @Schema(description = "买家诉求，如「周末当面交易，希望含充电器」")
+            @NotBlank(message = "请填写你的求购诉求")
+            @Size(max = 500, message = "诉求最长 500 个字符") String demandText,
+
+            @Schema(description = "期望交易时间，如「周六下午」")
+            @Size(max = 64, message = "时间描述过长") String preferredTime,
+
+            @Schema(description = "期望交易地点")
+            @Size(max = 128, message = "地点过长") String preferredPlace,
+
+            @Schema(description = "期望交易方式：1 当面 / 2 邮寄")
+            @Min(value = 1, message = "交易方式不合法")
+            @Max(value = 2, message = "交易方式不合法") Integer tradeType
+    ) {
+    }
+
+    @Schema(description = "撮合确认：双方都确认后才算达成，系统不自动成交")
+    public record MatchConfirmDTO(
+            @Schema(description = "是否接受撮合建议")
+            @NotNull(message = "缺少确认结果") Boolean accepted,
+
+            @Schema(description = "确认/拒绝留言")
+            @Size(max = 255, message = "留言最长 255 个字符") String note
     ) {
     }
 }

@@ -68,6 +68,7 @@ public class OrderService {
     private final UserMapper userMapper;
     private final ItemService itemService;
     private final NotificationService notificationService;
+    private final com.bobo.ai.match.MatchService matchService;
 
     // ------------------------------------------------------------------ 下单
 
@@ -88,16 +89,24 @@ public class OrderService {
 
         int tradeType = resolveTradeType(item, dto.tradeType());
 
+        // 智能撮合价：价格只从服务端撮合单读取，绝不接受前端传价格。
+        // consumeForOrder 同时把撮合单原子推进到「已下单」，防止一单多次使用。
+        java.math.BigDecimal unitPrice = item.getPrice();
+        if (dto.matchId() != null) {
+            unitPrice = matchService.consumeForOrder(dto.matchId(), item.getItemId());
+        }
+
         Order order = new Order();
         order.setOrderNo(generateOrderNo());
         order.setItemId(item.getItemId());
         order.setBuyerId(buyerId);
         order.setSellerId(item.getSellerId());
+        order.setMatchId(dto.matchId());
         order.setItemTitle(item.getTitle());
         order.setItemCover(item.getCover());
-        order.setPrice(item.getPrice());
+        order.setPrice(unitPrice);
         order.setQuantity(1);
-        order.setTotalAmount(item.getPrice());
+        order.setTotalAmount(unitPrice);
         order.setTradeType(tradeType);
         order.setRemark(dto.remark());
         order.setStatus(Order.STATUS_UNPAID);

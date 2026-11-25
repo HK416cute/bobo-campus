@@ -44,6 +44,13 @@ public class AdminAiController {
     private final AdminCopilotService copilotService;
     private final AiSettingsService settingsService;
 
+    // 技术升级：知识库管理 + 撮合/定价统计
+    private final com.bobo.ai.rag.KnowledgeIndexService knowledgeIndexService;
+    private final com.bobo.ai.rag.KnowledgeRetriever knowledgeRetriever;
+    private final com.bobo.ai.spi.VisionInvoker visionInvoker;
+    private final com.bobo.mapper.PriceEstimateMapper priceEstimateMapper;
+    private final com.bobo.mapper.MatchRequestMapper matchRequestMapper;
+
     @Operation(summary = "读取 AI 模型配置（Key 已脱敏，永不返回明文）")
     @GetMapping("/settings")
     public Result<AiVos.AiSettingsVO> settings() {
@@ -98,5 +105,63 @@ public class AdminAiController {
     @PostMapping("/ask")
     public Result<AiVos.AdminReportVO> ask(@Valid @RequestBody Dtos.AiAskDTO dto) {
         return Result.ok(copilotService.ask(dto.question()));
+    }
+
+    // ================================================================== 技术升级
+
+    @Operation(summary = "知识库状态：文档、切片、维度与不可用原因")
+    @GetMapping("/knowledge")
+    public Result<com.bobo.domain.vo.AiUpgradeVos.KnowledgeStatsVO> knowledge() {
+        return Result.ok(knowledgeRetriever.stats());
+    }
+
+    @Operation(summary = "重建知识库索引（改完规则正文后调用）")
+    @PostMapping("/knowledge/reindex")
+    public Result<java.util.Map<String, Object>> reindexKnowledge() {
+        com.bobo.ai.rag.KnowledgeIndexService.IndexResult result = knowledgeIndexService.rebuild();
+        java.util.Map<String, Object> data = new java.util.LinkedHashMap<>();
+        data.put("docCount", result.docCount());
+        data.put("chunkCount", result.chunkCount());
+        data.put("message", "索引已重建，问答立即生效");
+        return Result.ok(data);
+    }
+
+    @Operation(summary = "技术升级统计：估价/采纳/撮合/知识库 + 多模态可用性")
+    @GetMapping("/upgrade/stats")
+    public Result<com.bobo.domain.vo.AiUpgradeVos.UpgradeStatsVO> upgradeStats() {
+        com.bobo.domain.vo.AiUpgradeVos.UpgradeStatsVO vo =
+                new com.bobo.domain.vo.AiUpgradeVos.UpgradeStatsVO();
+        Long estimates = safeCount(() -> priceEstimateMapper.selectCount(null));
+        Long adopted = safeCount(() -> priceEstimateMapper.selectCount(
+                com.baomidou.mybatisplus.core.toolkit.Wrappers
+                        .<com.bobo.domain.entity.PriceEstimate>lambdaQuery()
+                        .eq(com.bobo.domain.entity.PriceEstimate::getAdopted, 1)));
+        Long matches = safeCount(() -> matchRequestMapper.selectCount(null));
+        Long agreed = safeCount(() -> matchRequestMapper.selectCount(
+                com.baomidou.mybatisplus.core.toolkit.Wrappers
+                        .<com.bobo.domain.entity.MatchRequest>lambdaQuery()
+                        .in(com.bobo.domain.entity.MatchRequest::getStatus,
+                                com.bobo.domain.entity.MatchRequest.STATUS_AGREED,
+                                com.bobo.domain.entity.MatchRequest.STATUS_ORDERED)));
+        com.bobo.domain.vo.AiUpgradeVos.KnowledgeStatsVO knowledge = knowledgeRetriever.stats();
+        vo.setEstimateTotal(estimates == null ? 0 : estimates);
+        vo.setEstimateAdopted(adopted == null ? 0 : adopted);
+        vo.setMatchTotal(matches == null ? 0 : matches);
+        vo.setMatchAgreed(agreed == null ? 0 : agreed);
+        vo.setKnowledgeDocCount(knowledge.getDocCount());
+        vo.setKnowledgeChunkCount(knowledge.getChunkCount());
+        vo.setVisionAvailable(visionInvoker.available());
+        vo.setVisionModel(visionInvoker.model());
+        vo.setUpdateTime(java.time.LocalDateTime.now());
+        return Result.ok(vo);
+    }
+
+    /** 未执行 06 脚本时统计表不存在：返回 0，让后台页面仍能打开 */
+    private Long safeCount(java.util.function.Supplier<Long> supplier) {
+        try {
+            return supplier.get();
+        } catch (Exception e) {
+            return 0L;
+        }
     }
 }

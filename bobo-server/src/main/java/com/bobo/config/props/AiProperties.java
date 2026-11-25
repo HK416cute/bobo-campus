@@ -25,8 +25,31 @@ public class AiProperties {
     /** 接口地址，默认 DeepSeek 官方；换代理/自建网关只改这里 */
     private String baseUrl = "https://api.deepseek.com";
 
-    /** 对话模型：deepseek-chat（通用，便宜）/ deepseek-reasoner（推理，贵且慢） */
-    private String model = "deepseek-chat";
+    /** 对话模型：deepseek-flash（通用且支持图像输入）/ deepseek-v4-pro（推理更强） */
+    private String model = "deepseek-flash";
+
+    // ------------------------------------------------------------------
+    // 多模态与智能撮合（技术升级）：全部走 DeepSeek 同一套 Key / Base URL，
+    // 不引入第二家厂商；deepseek-flash 已原生支持图片输入，无需单独的视觉 Key。
+    // ------------------------------------------------------------------
+
+    /** 是否启用图像理解（关闭后定价只走规则，不发送图片） */
+    private boolean visionEnabled = true;
+
+    /** 多模态模型；留空则复用 {@link #model} */
+    private String visionModel = "deepseek-flash";
+
+    /** 单次视觉调用最大输出 token */
+    private int visionMaxTokens = 900;
+
+    /** 单次视觉调用的连接/读取超时（毫秒）。看图比纯文本慢，单独给更宽的超时 */
+    private long visionTimeoutMs = 30000;
+
+    /** 多轮撮合最大轮次（技术规格书建议 3 轮） */
+    private int matchMaxRounds = 3;
+
+    /** 一次撮合协商的端到端时间预算（毫秒），超时不再发起新的模型调用 */
+    private long matchTimeoutMs = 30000;
 
     /** 单次调用超时（毫秒）。超时即走降级，不能让用户干等 */
     private long timeoutMs = 15000;
@@ -64,5 +87,10 @@ public class AiProperties {
     /** 是否具备调用远程模型的必要条件（开关 + key） */
     public boolean usable() {
         return enabled && apiKey != null && !apiKey.isBlank();
+    }
+
+    /** 是否具备图像理解能力（文本模型可用 + 多模态开关） */
+    public boolean visionUsable() {
+        return usable() && visionEnabled;
     }
 }

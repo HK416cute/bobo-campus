@@ -2,6 +2,11 @@
 
 > 本文是 AI 模块的**唯一事实来源**：设计理由、降级策略、成本与可观测性、安全边界、验收数据。
 > 接口契约见 [api.md](api.md)，分层与鉴权见 [architecture.md](architecture.md)，部署见 [deploy.md](deploy.md)。
+>
+> **2026-11 技术升级**：在原有三个场景之上新增「多智能体撮合 / DeepSeek 视觉定价 / RAG 知识库问答」，
+> 并按最新要求从 Claude 方案切换为 DeepSeek（同一套 Key / Base URL）。
+> 升级设计与验收见 **[ai-upgrade.md](ai-upgrade.md)**；本文第 3~7 节的原则（统一执行器、
+> 四级降级、成本治理、安全边界）对新增模块同样适用。
 
 ## 一、做了什么，以及刻意不做什么
 
@@ -13,13 +18,16 @@
 | ② | **自然语言检索** | `SearchView` 只有 `LIKE` 关键词，"500 以内能当面交易的山地车"搜不出东西 | 检索意图解析（自然语言 → 结构化槽位）+ 对候选集做 LLM 重排 |
 | ③ | **内容审核 + 运营 Copilot** | 审核全靠人工看；看板只有数字，没有结论 | 内容风险评分（带幂等缓存）+ 数据转自然语言报告 |
 
-**刻意不做**（这些是主动取舍，面试被追问时就是加分项）：
+**2026-11 升级：原「刻意不做」里补上了两项，仍有一项不做**（取舍写在前面，避免自相矛盾）：
 
-- ❌ **不做 embedding / 向量库 / RAG**：DeepSeek 不提供 embedding 接口。硬上就得再引一家厂商 + Redis Stack，
-  运维面扩大而收益不确定（本场景候选集只有几百条，SQL 过滤已足够）。所以②的措辞是
-  **"意图解析 + 重排"**，不是"向量召回"，简历与文档都不吹这一点。
-- ❌ **不做以图搜同款 / 图片生成标题**：DeepSeek V3/R1 是纯文本模型，不支持图像输入。
-- ❌ **不做多轮对话助手**：私信场景的 Tool Calling 助手工作量大、演示价值不如①③直接，留作后续扩展。
+- ✅ **RAG 知识库问答**：DeepSeek 不提供 embedding 接口，所以用**本地 512 维哈希向量 + MySQL**
+  做召回，不引 Chroma/Qdrant/Redis Stack；DeepSeek 只负责基于片段生成，并强制返回引用。
+- ✅ **多轮 Agent 撮合**：服务端状态机编排买家/卖家 Agent，最多 3 轮、30 秒预算，
+  达成后必须双方人工确认；无模型时用规则引擎确定性协商。
+- ✅ **视觉定价与成色**：`deepseek-flash` 原生支持图像输入，图片以 base64 送入；
+  无 Key 或关闭多模态时用「同类价位分位 × 成色系数」规则估价。
+- ❌ **仍不做以图搜同款**：图片只用于成色/定价，不做商品图像向量检索。
+- ❌ **仍不做开放式聊天助手**：撮合是任务型多轮，不是通用闲聊；私信场景不接 AI。
 
 ## 二、依赖版本（为什么必须一起升）
 
@@ -33,6 +41,9 @@
 
 > Spring AI 各版本冻结的 Boot 版本是硬事实：1.0.0 → 3.4.5，1.0.9 → 3.5.15。
 > 想用 2.0.0 就得 Boot 4.1.0，那是另一个量级的升级，本项目不做。
+>
+> **2026-11 升级未新增 Maven 依赖**：DeepSeek 视觉调用用 Spring `RestClient` 手写，
+> RAG 向量化在本地实现，不引 Anthropic SDK / Chroma / Qdrant。
 
 **一个容易踩的坑**：`spring-ai-starter-model-deepseek` 在本项目里**基本不提供开箱可用的自动配置**，
 所以 `AiChatConfig` 手写 `ChatInvoker` Bean，而不是注入一个现成的 `ChatModel`。
@@ -121,7 +132,8 @@ outcome.source();  // "ai" / "rule" —— 前端据此打标签，不假装是 
   避免"模型幻觉触发真实业务动作"。
 - **模型输出一律当不可信输入处理**：结构化输出必须过 JSON 解析 + 字段校验，
   不通过就走规则降级，绝不直接把模型文本拼进 SQL 或前端 `v-html`。
-- **`api-key` 只从环境变量注入**（`BOBO_AI_API_KEY`），不写进仓库、不写进 `.env.example` 的真实值。
+- **`api-key` 只在服务端**（环境变量 `BOBO_AI_API_KEY`，或后台「模型配置」写入的单行表），
+  不写进仓库、不暴露前端、不打印日志。
 
 ## 七、配置项速查（`bobo.ai.*`）
 
@@ -130,7 +142,13 @@ outcome.source();  // "ai" / "rule" —— 前端据此打标签，不假装是 
 | `enabled` | `BOBO_AI_ENABLED` | `true` | 关掉后全层走规则，不发起任何外部调用 |
 | `api-key` | `BOBO_AI_API_KEY` | 空 | 空 = 无 AI，自动降级 |
 | `base-url` | `BOBO_AI_BASE_URL` | `https://api.deepseek.com` | 换代理/网关只改这里 |
-| `model` | `BOBO_AI_MODEL` | `deepseek-chat` | 另可选 `deepseek-reasoner`（更慢更贵） |
+| `model` | `BOBO_AI_MODEL` | `deepseek-flash` | 文本模型；另可选 `deepseek-v4-pro` |
+| `vision-enabled` | `BOBO_AI_VISION_ENABLED` | `true` | 是否启用图像理解；关闭后定价走规则 |
+| `vision-model` | `BOBO_AI_VISION_MODEL` | `deepseek-flash` | 多模态模型；留空复用 `model` |
+| `vision-max-tokens` | `BOBO_AI_VISION_MAX_TOKENS` | `900` | 单次估价最大输出 token |
+| `vision-timeout-ms` | `BOBO_AI_VISION_TIMEOUT_MS` | `30000` | 看图调用超时（比纯文本宽） |
+| `match-max-rounds` | `BOBO_AI_MATCH_ROUNDS` | `3` | 撮合最大轮次 |
+| `match-timeout-ms` | `BOBO_AI_MATCH_TIMEOUT_MS` | `30000` | 一次撮合的总预算 |
 | `timeout-ms` | `BOBO_AI_TIMEOUT_MS` | `15000` | 连接与读超时都按此设置 |
 | `max-attempts` | `BOBO_AI_MAX_ATTEMPTS` | `1` | 失败重试次数，不含降级那一跳 |
 | `temperature` | `BOBO_AI_TEMPERATURE` | `0.2` | 结构化抽取要稳定，故调低 |
@@ -172,8 +190,13 @@ outcome.source();  // "ai" / "rule" —— 前端据此打标签，不假装是 
 ## 八、数据库
 
 新增 4 张表，脚本 `mysql/init/03-ai.sql`（流水/反馈/审核）、
-`04-seed-ai.sql`（演示数据）、`05-ai-setting.sql`（**运行期配置**），
-由 MySQL 官方镜像按文件名顺序自动执行，**必须在 01/02 之后**。
+`05-ai-setting.sql`（**运行期配置**）；`04-seed-ai.sql` 已移到 `mysql/demo/04-seed-ai-demo.sql`，
+只在需要 AI 演示数据时手动导入，不会由 Docker 首次启动自动执行。
+`03` 与 `05` 由 MySQL 官方镜像按文件名顺序自动执行，**必须在 01/02 之后**。
+
+**2026-11 升级新增** `mysql/init/06-ai-upgrade.sql`：定价/撮合/知识库 5 张表、
+`bobo_item` 的 AI 建议字段、`bobo_order.match_id`，以及三篇知识库种子文档。
+脚本幂等，已有部署可重复执行（见 [deploy.md](deploy.md) 2.1）。
 
 | 表 | 作用 | 关键列 |
 |---|---|---|
@@ -181,6 +204,11 @@ outcome.source();  // "ai" / "rule" —— 前端据此打标签，不假装是 
 | `bobo_ai_suggestion_feedback` | 建议与采纳：**采纳率的唯一事实来源** | `suggestion_type` / `accepted` / `suggested_value` / `final_value` |
 | `bobo_ai_moderation` | 内容审核结论：事前风险判定 | `content_hash`(幂等键) / `risk_level` / `decision_source` |
 | `bobo_ai_setting` | **运行期配置（单行表）**：Key/模型/限流/单价 | `setting_id`(恒为1) / `api_key` / `model` / 各限额 |
+| `bobo_price_estimate` | 视觉定价快照：图片、成色、区间、理由、样本、采纳 | `condition_grade` / `price_low/mid/high` / `source` / `adopted` |
+| `bobo_match_request` | 智能撮合单：预算、达成价、轮次、双方确认 | `status` / `agreed_price` / `buyer_confirmed` / `seller_confirmed` |
+| `bobo_match_message` | 撮合协商消息（ConversationLog） | `round_no` / `sender` / `action` / `price` / `source` |
+| `bobo_knowledge_doc` | RAG 知识库文档 | `title` / `category` / `content` / `chunk_count` |
+| `bobo_knowledge_chunk` | 切片与向量 | `doc_id` / `chunk_no` / `content` / `embedding`(Base64 float32) |
 
 **审计类三张表刻意不加 `del_flag`**：它们属于审计数据，只追加不软删；
 要清理按时间归档，避免"逻辑删除"把统计口径搞脏。
@@ -192,6 +220,10 @@ outcome.source();  // "ai" / "rule" —— 前端据此打标签，不假装是 
 |---|---|---|
 | `SafeJsonParserTest` | Markdown 围栏、前后夹带解释、字符串内括号、截断、非对象 JSON | ❌ 纯函数 |
 | `AiExecutorTest` | 成功 / 失败降级 / 输出不可解析 / 无 key 短路 / noop 短路 / 配额用尽 / 限流 / 成本折算 / 摘要稳定性 | ❌ 用 `MockChatInvoker` |
+| `LocalHashEmbeddingProviderTest` | 向量确定性、语义区分、Base64 可逆、空文本安全 | ❌ 纯函数 |
+| `KnowledgeChunkerTest` | 切片长度、重叠、超长句硬切、空内容 | ❌ 纯函数 |
+| `PriceHeuristicsTest` | 成色归一、系数单调、越界收敛、上下限纠正 | ❌ 纯函数 |
+| `MatchRuleEngineTest` | 预算内达成、低预算失败、出价/还价边界 | ❌ 纯函数 |
 
 **为什么这些必须离线可测**：AI 功能的失败形态（偶发空白、悄悄一直走规则）极难从现象反推，
 只能靠单元测试把每条路径钉死。真实模型只用于**离线评测**——对同一批 query 跑
@@ -268,6 +300,10 @@ pwsh -File mysql/e2e/verify-ai.ps1 -BaseUrl http://127.0.0.1:19099
 每条 AI 能力都要有一个可复现的端到端探针。
 
 ## 十、实测数据与简历表述
+
+> **口径说明**：以下数字是 2026-10 原三场景（发布助手 / 检索解析 / 审核 / Copilot）的实测，
+> 未包含 2026-11 新增的撮合、视觉定价与 RAG 模块。新增模块的验收方式、降级路径与
+> 成本上限见 [ai-upgrade.md](ai-upgrade.md) 第十二节；数字请以实际运行结果为准，不要混用。
 
 ### 10.1 本地环境（独立 MySQL 容器 + 12 件在售商品）
 

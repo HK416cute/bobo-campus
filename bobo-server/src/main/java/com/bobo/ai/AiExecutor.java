@@ -1,6 +1,7 @@
 package com.bobo.ai;
 
 import com.bobo.ai.spi.ChatInvoker;
+import com.bobo.ai.spi.VisionInvoker;
 import com.bobo.domain.entity.AiCallLog;
 import com.bobo.mapper.AiCallLogMapper;
 import com.bobo.security.AuthContext;
@@ -8,7 +9,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * AI 场景统一执行器：所有 AI 能力都必须经过它，而不是各自直接调用模型。
@@ -28,6 +31,10 @@ import java.util.function.Function;
  *
  * <p>固定流程：<b>门控 → 限流 → 配额 → 调用（超时/重试）→ 解析校验 → 落流水</b>，
  * 任一步失败都走同一条降级路径，因此「模型挂了」在业务代码里不存在特殊分支。
+ *
+ * <p><b>升级后新增 {@link #executeVision}</b>：视觉定价必须把图片一起交给模型，
+ * 而图片不能塞进 userPrompt 字符串。两条路径共用同一套门控/限流/配额/流水逻辑，
+ * 避免出现「文本场景计入了配额、视觉场景没计入」的口径分裂。
  *
  * @author bobo
  */
@@ -62,7 +69,7 @@ public class AiExecutor {
             """;
 
     /**
-     * 执行一次 AI 场景调用。
+     * 执行一次 AI 场景调用（纯文本，DeepSeek）。
      *
      * @param scene        场景标识，写入流水用于分场景统计
      * @param systemPrompt 角色与约束
@@ -76,12 +83,63 @@ public class AiExecutor {
                                     String systemPrompt,
                                     String userPrompt,
                                     Function<String, T> parser,
-                                    java.util.function.Supplier<T> degrade) {
+                                    Supplier<T> degrade) {
+        String provider = chatInvoker.name();
+        return run(scene, systemPrompt, userPrompt, parser, degrade,
+                availability.modelUsable(), availability.unavailableReason(),
+                provider, settingsProvider.current().model(), null,
+                fullPrompt -> chatInvoker.generate(fullPrompt, userPrompt));
+    }
+
+    /**
+     * 执行一次视觉场景（图片 + 文本），门控看 {@link VisionInvoker#available()}。
+     *
+     * @param images    图片附件，可为空列表（此时等价于纯文本调用）
+     * @param maxTokens 最大输出 token
+     * @param rate      该 provider 的计价；null 表示沿用 DeepSeek 的运行时单价
+     */
+    public <T> AiOutcome<T> executeVision(String scene,
+                                          String systemPrompt,
+                                          String userPrompt,
+                                          List<VisionInvoker.ImageAttachment> images,
+                                          VisionInvoker vision,
+                                          int maxTokens,
+                                          AiCallRecorder.CostRate rate,
+                                          Function<String, T> parser,
+                                          Supplier<T> degrade) {
+        boolean usable = vision.available();
+        return run(scene, systemPrompt, userPrompt, parser, degrade,
+                usable, usable ? null : vision.unavailableReason(),
+                vision.name(), vision.model(), rate,
+                fullPrompt -> vision.generate(fullPrompt, userPrompt, images, maxTokens));
+    }
+
+    /**
+     * 两条路径共用的执行骨架。
+     *
+     * @param usable            当前 provider 是否可用（决定门控）
+     * @param unavailableReason 门控失败原因，直接回显给用户
+     * @param provider          写入流水的实现名
+     * @param model             写入流水的模型名
+     * @param rate              计价，null 时按 DeepSeek 运行时单价
+     * @param caller            真正发起请求的函数（入参是拼好 JSON 契约的系统提示词）
+     */
+    private <T> AiOutcome<T> run(String scene,
+                                 String systemPrompt,
+                                 String userPrompt,
+                                 Function<String, T> parser,
+                                 Supplier<T> degrade,
+                                 boolean usable,
+                                 String unavailableReason,
+                                 String provider,
+                                 String model,
+                                 AiCallRecorder.CostRate rate,
+                                 Function<String, ChatInvoker.ChatReply> caller) {
         Long userId = AuthContext.userIdOrNull();
 
         // 1) 门控：没有 key / 显式关闭 —— 不调用、不写流水（否则流水表会被无意义的降级记录灌满）
-        if (!availability.modelUsable()) {
-            return AiOutcome.rule(degrade.get(), availability.unavailableReason(), null);
+        if (!usable) {
+            return AiOutcome.rule(degrade.get(), unavailableReason, null);
         }
 
         // 2) 限流
@@ -105,7 +163,7 @@ public class AiExecutor {
         String lastError = null;
         for (int attempt = 1; attempt <= attempts; attempt++) {
             try {
-                ChatInvoker.ChatReply reply = chatInvoker.generate(systemPrompt + JSON_CONTRACT, userPrompt);
+                ChatInvoker.ChatReply reply = caller.apply(systemPrompt + JSON_CONTRACT);
                 String raw = reply.text();
                 T value = parser.apply(raw);
                 if (value == null) {
@@ -113,21 +171,22 @@ public class AiExecutor {
                     continue;
                 }
                 long cost = System.currentTimeMillis() - start;
-                Long logId = recorder.record(scene, AiCallLog.STATUS_SUCCESS, null, null,
+                Long logId = recorder.recordAs(provider, model, rate, scene,
+                        AiCallLog.STATUS_SUCCESS, null, null,
                         userPrompt, raw, cost, reply.promptTokens(), reply.completionTokens());
                 return AiOutcome.ai(value, logId, cost);
             } catch (Exception e) {
                 lastError = e.getClass().getSimpleName() + ": " + e.getMessage();
-                log.warn("AI 调用失败：scene={}, attempt={}/{}, cause={}",
-                        scene, attempt, attempts, lastError);
+                log.warn("AI 调用失败：scene={}, provider={}, attempt={}/{}, cause={}",
+                        scene, provider, attempt, attempts, lastError);
             }
         }
 
         // 5) 全部尝试失败 —— 记失败流水后降级，业务仍然拿到可用结果
         long cost = System.currentTimeMillis() - start;
         T fallback = degrade.get();
-        Long logId = recorder.record(scene, AiCallLog.STATUS_FAILED,
-                "模型调用失败，已降级为规则结果", lastError,
+        Long logId = recorder.recordAs(provider, model, rate, scene,
+                AiCallLog.STATUS_FAILED, "模型调用失败，已降级为规则结果", lastError,
                 userPrompt, null, cost, null, null);
         return AiOutcome.rule(fallback, "模型暂时不可用，已使用规则结果", logId);
     }

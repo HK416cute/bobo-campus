@@ -6,8 +6,9 @@
 ![Vue](https://img.shields.io/badge/Vue-3.4-4FC08D)
 ![Vite](https://img.shields.io/badge/Vite-5-646CFF)
 ![Element Plus](https://img.shields.io/badge/Element%20Plus-2.7-409EFF)
-![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2-6DB33F)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4-6DB33F)
 ![Java](https://img.shields.io/badge/Java-17-007396)
+![DeepSeek](https://img.shields.io/badge/DeepSeek-deepseek--flash-4D6BFE)
 ![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)
 
@@ -37,6 +38,9 @@
 | 评价 | 订单完成后双向评价（1-5 星），评分影响对方信用分 |
 | 个人 | 个人中心概览、我的发布、我的订单（买/卖）、收货地址管理、他人主页、站内通知 |
 | 举报 | 举报商品 / 用户 / 评价，查看自己的举报进度 |
+| AI 估价 | 发布页上传实物图后，由 DeepSeek 视觉判断成色并给出建议价格区间；卖家点「采用建议」才写入商品 |
+| 智能撮合 | 选商品发起买家 Agent 与卖家 Agent 多轮谈价（最多 3 轮/30 秒），双方确认后可按撮合价下单 |
+| 知识问答 | 基于交易规则、违禁品清单、纠纷处理流程的 RAG 问答，回答带可核验的规则引用 |
 
 ### 管理端（`/admin`）
 
@@ -56,8 +60,8 @@
 | 层次 | 选择 | 说明 |
 |---|---|---|
 | 前端 | Vue 3.4 + Vite 5 + Element Plus 2.7 + Pinia + Vue Router 4 + ECharts 5 | 全部 `<script setup>`；图表只在管理端加载 |
-| 后端 | Spring Boot 3.4.5 + Java 17 + MyBatis-Plus 3.5.12 + springdoc-openapi 2.8 | `jakarta.*` 命名空间；Boot 版本与 Spring AI 对齐（见下） |
-| AI | Spring AI 1.0.0 + DeepSeek（`deepseek-chat`） | 只做**结构化抽取 / 检索意图解析 + 重排 / 内容风险评分**；不引 embedding 与向量库。AI 是可选增强：未配置 `BOBO_AI_API_KEY` 时全层降级为规则实现，应用照常启动。详见 [docs/ai.md](docs/ai.md) |
+| 后端 | Spring Boot 3.4.5 + Java 17 + MyBatis-Plus 3.5.12 + springdoc-openapi 2.7.0 | `jakarta.*` 命名空间；Boot 版本与 Spring AI 对齐（见下） |
+| AI | DeepSeek（`deepseek-flash` 文本+多模态 / `deepseek-v4-pro` 可选） | 原有发布助手、检索解析、审核、运营 Copilot；技术升级新增**多智能体撮合 / 视觉定价 / RAG 问答**。文本走 Spring AI，视觉走 DeepSeek 图像输入，RAG 用本地 512 维哈希向量。无 Key 时全层降级为规则实现。详见 [docs/ai.md](docs/ai.md) 与 [docs/ai-upgrade.md](docs/ai-upgrade.md) |
 | 鉴权 | jjwt 0.12 + 自定义拦截器（`@Anonymous` 注解标记免登录） | **没有引入 Spring Security**：本项目只需要「认证 + 两种角色」，一个拦截器 + ThreadLocal 上下文比拉起整条过滤器链更轻、更好读 |
 | 密码 | PBKDF2-HMAC-SHA256（12 万次迭代，格式含迭代数，便于以后提高强度） | 无第三方依赖 |
 | 数据库 | MySQL 8.0（utf8mb4 / utf8mb4_unicode_ci，金额一律 DECIMAL） | 初始化脚本在 `mysql/init` |
@@ -76,12 +80,13 @@ bobo/
 │   │   ├── controller/             # 前台接口
 │   │   │   └── admin/              # 管理端接口
 │   │   ├── domain/
-│   │   │   ├── entity/             # 12 张表对应实体
+│   │   │   ├── entity/             # 数据表对应实体（含 AI/撮合/知识库）
 │   │   │   ├── dto/                # 请求体（record + 校验注解）
 │   │   │   ├── query/              # 列表查询条件
 │   │   │   └── vo/                 # 响应视图对象
 │   │   ├── mapper/                 # MyBatis-Plus Mapper
 │   │   ├── security/               # JWT、密码散列、登录上下文、拦截器
+│   │   ├── ai/                     # AI 统一执行器 + 文本/视觉调用器 + pricing/match/rag 三大模块
 │   │   └── service/                # 业务逻辑（订单状态机、审核流转都在这里）
 │   └── src/main/resources/
 │       ├── application.yml
@@ -101,7 +106,9 @@ bobo/
 ├── docker/                         # 部署产物
 │   ├── bobo-server/Dockerfile      # Maven 多阶段构建 → JRE 运行
 │   └── bobo-web/                   # 前端构建 + nginx 配置
-├── mysql/init/                     # 01-schema.sql（建表）、02-seed.sql（演示数据）
+├── mysql/init/                     # 01-schema（建表）、02-seed（仅分类 + admin/HK416）、03/05/06 AI 表
+├── mysql/demo/                     # 可选演示数据（不会被 Docker 首次启动自动执行）
+├── mysql/fix/                      # 运维修复/业务数据重置脚本
 ├── docs/                           # 架构、数据库、API、部署文档
 ├── docker-compose.yml
 └── .env.example
@@ -123,7 +130,7 @@ docker compose ps             # 三个容器都应为 healthy / running
 访问：
 
 - 前台：`http://<服务器IP>/`
-- 管理后台：`http://<服务器IP>/admin`（或用前台登录页底部的「管理员登录入口」）
+- 管理后台：`http://<服务器IP>/bobo-campus/admin`（或用前台登录页底部的「管理员登录入口」）
 
 > 两个常见环境问题：
 > - 同一台机器已有别的 `bobo-mysql` / `bobo-server` 容器时，改 `.env` 的
@@ -132,15 +139,16 @@ docker compose ps             # 三个容器都应为 healthy / running
 >   与 `BOBO_MYSQL_IMAGE=docker.1ms.run/mysql:8.0`。
 > 详见 [docs/deploy.md](docs/deploy.md) 的排障手册 7.8。
 
-演示账号（来自 `02-seed.sql`，**上生产前请立即改密码**）：
+初始化账号（来自 `02-seed.sql`，**上生产前请立即改密码**）：
 
 | 账号 | 密码 | 角色 |
 |---|---|---|
-| `admin` | `password` | 管理员 |
-| `xiaoyu` | `password` | 普通用户（有在售商品） |
-| `lulu` | `password` | 普通用户 |
-| `tiedan` | `password` | 普通用户 |
-| `mianbao` | `password` | 普通用户 |
+| `admin` | `password` | 管理员（昵称 bobo管理员） |
+| `2330090307` | `password` | 普通用户（昵称 HK416） |
+
+> `02-seed.sql` 是**干净库种子**：只建 16 个分类和上面两个账号，不生成商品、订单、评价、通知等演示数据。
+> 需要完整演示数据时，用 `mysql/demo/02-seed-demo.sql` **替代** `02-seed.sql` 初始化（两者不要同时导入），
+> 再按需导入 `mysql/demo/04-seed-ai-demo.sql`。Docker 首次启动只挂载 `mysql/init/`，`mysql/demo/` 不会自动执行。
 
 ### 5.2 本地开发
 
@@ -150,7 +158,13 @@ docker compose ps             # 三个容器都应为 healthy / running
 cd bobo-server
 # 1) 建库并导入初始化脚本（或直接用 docker compose up -d bobo-mysql）
 mysql -h127.0.0.1 -uroot -p < ../mysql/init/01-schema.sql
+# 干净库用 02-seed.sql；需要完整演示数据时，改用 ../mysql/demo/02-seed-demo.sql（二选一）
 mysql -h127.0.0.1 -uroot -p bobo < ../mysql/init/02-seed.sql
+mysql -h127.0.0.1 -uroot -p bobo < ../mysql/init/03-ai.sql
+mysql -h127.0.0.1 -uroot -p bobo < ../mysql/init/05-ai-setting.sql
+mysql -h127.0.0.1 -uroot -p bobo < ../mysql/init/06-ai-upgrade.sql   # 技术升级表 + 知识库种子
+# 可选：仅当使用 demo seed 时再导入 AI 演示流水
+# mysql -h127.0.0.1 -uroot -p bobo < ../mysql/demo/04-seed-ai-demo.sql
 # 2) 用环境变量覆盖默认数据源（默认值是 localhost:3306/bobo，账号 bobo/bobo123456）
 mvn spring-boot:run
 # 接口文档：http://localhost:9080/swagger-ui.html
@@ -171,7 +185,7 @@ pnpm build         # 产物在 dist/
 cd bobo-web
 pnpm run check                   # = check-static + check-contract，见下
 node scripts/check-static.mjs    # 脚本语法、模板表达式、标签与括号配平
-node scripts/check-contract.mjs  # 前端调用的接口是否都能在后端找到（92 条路由逐一比对）
+node scripts/check-contract.mjs  # 前端调用的接口是否都能在后端找到（116 条路由逐一比对）
 node scripts/gen-assets.mjs      # 重新生成 public/img 下的占位图
 python scripts/make-favicon.py   # 生成 favicon.ico / apple-touch-icon.png（需 Pillow）
 ```
@@ -211,14 +225,18 @@ docker compose run --rm --no-deps bobo-server --bobo.password-tool=bobo@2026 --b
 | JWT 有效期 | 7 天 | `BOBO_JWT_EXPIRE_MINUTES` |
 | 上传大小 | 单图 10MB，单请求 40MB | `application.yml` 的 `spring.servlet.multipart` |
 | 管理员注册邀请码 | 空（关闭） | `BOBO_ADMIN_REGISTER_CODE` |
+| AI 文本模型 | `deepseek-flash` | `BOBO_AI_MODEL`（可选 `deepseek-v4-pro`） |
+| AI 多模态模型 | `deepseek-flash` | `BOBO_AI_VISION_MODEL`；`BOBO_AI_VISION_ENABLED=false` 可关闭 |
+| 撮合轮次 / 预算 | 3 轮 / 30 秒 | `BOBO_AI_MATCH_ROUNDS` / `BOBO_AI_MATCH_TIMEOUT_MS` |
 
 ## 七、文档索引
 
 | 文档 | 内容 |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | 分层设计、鉴权方案、订单状态机、一致性策略、扩展点 |
-| [docs/database.md](docs/database.md) | 12 张表结构、索引设计、状态字段取值、初始化脚本说明 |
+| [docs/database.md](docs/database.md) | 21 张表结构、索引设计、状态字段取值、初始化脚本说明 |
 | [docs/ai.md](docs/ai.md) | **AI 能力设计与面试要点**：三场景选型、四级降级、成本与可观测性、安全边界、配置速查、离线测试 |
+| [docs/ai-upgrade.md](docs/ai-upgrade.md) | **2026-11 技术升级**：DeepSeek 多智能体撮合、视觉定价、RAG 问答的设计/接口/数据模型/验收 |
 | [docs/api.md](docs/api.md) | 全部接口契约（前后端唯一事实来源） |
 | [docs/deploy.md](docs/deploy.md) | 云服务器部署手册：安全组、HTTPS、备份、日志、升级、排障 |
 
@@ -233,6 +251,8 @@ docker compose run --rm --no-deps bobo-server --bobo.password-tool=bobo@2026 --b
    不用自增自减，避免历史脏数据导致列表排序越来越离谱。
 5. **图片用挂载卷 + nginx 直读**：不引对象存储，运维简单；nginx 用 `alias` 直接读文件，不占后端线程。
 6. **单模块后端**：多模块（common/system/web）在十几张表的规模下只增加编译与依赖管理成本，收益不明显。
+7. **技术升级只换模型、不换架构**：撮合/定价/RAG 全部复用 `AiExecutor` 的门控、限流、配额、流水与降级；
+   DeepSeek 同时承担文本与视觉，避免再引一家厂商；RAG 用本地哈希向量而非外部向量库，保持单 Jar 部署。
 
 ## 九、许可
 

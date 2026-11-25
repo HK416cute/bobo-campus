@@ -43,8 +43,8 @@
 |---|---|---|---|
 | GET | `/api/items` | 商品分页。query: `keyword, categoryId, status, minPrice, maxPrice, campus, conditionLevel, tradeType, sortBy, onlyFavorite, sellerId, excludeSellerId, pageNum, pageSize`。<br>`sortBy`: `new`(默认) / `priceAsc` / `priceDesc` / `want` / `hot`。<br>前台只传 `status=1`；**后台管理不传 status 表示全部** | 匿名（带 token 时返回 `favorited`） |
 | GET | `/api/items/{itemId}` | 商品详情（含图片列表、卖家信息、卖家其他在售商品），同时浏览量 +1 | 匿名 |
-| POST | `/api/items` | 发布商品。body: `ItemDTO`，发布后状态为「待审核」 | 登录 |
-| PUT | `/api/items/{itemId}` | 编辑商品（仅本人，且状态非「已售」）；编辑后重新进入待审核 | 登录 |
+| POST | `/api/items` | 发布商品。body: `ItemDTO`，发布后状态为「待审核」。可选 `aiEstimateId`：卖家采用 AI 估价时传入，服务端校验归属后写入 `ai_*` 字段 | 登录 |
+| PUT | `/api/items/{itemId}` | 编辑商品（仅本人，且状态非「已售」）；编辑后重新进入待审核。同样支持 `aiEstimateId` | 登录 |
 | DELETE | `/api/items/{itemId}` | 删除商品（仅本人或管理员，逻辑删除，同时清理收藏与图片） | 登录 |
 | PUT | `/api/items/{itemId}/off-shelf` | 下架（仅本人） | 登录 |
 | PUT | `/api/items/{itemId}/on-shelf` | 重新上架（仅本人，回到待审核） | 登录 |
@@ -83,7 +83,7 @@
 
 | 方法 | 路径 | 说明 | 鉴权 |
 |---|---|---|---|
-| POST | `/api/orders` | 下单。body: `{itemId, tradeType, addressId, tradePlace, tradeTime, remark}`；校验商品在售、非本人商品；下单会把商品从「在售」**原子推进到「已售」**（`compareAndSetStatus`），因此并发下单只有一个人能成功，其余会收到「手慢啦，这件宝贝已被抢先下单」。代价：先下单不付款会占用商品，需卖家取消（或后续加超时自动取消任务）才能重新上架 | 登录 |
+| POST | `/api/orders` | 下单。body: `{itemId, tradeType, addressId, tradePlace, tradeTime, remark, matchId?}`；校验商品在售、非本人商品；下单会把商品从「在售」**原子推进到「已售」**（`compareAndSetStatus`），因此并发下单只有一个人能成功，其余会收到「手慢啦，这件宝贝已被抢先下单」。代价：先下单不付款会占用商品，需卖家取消（或后续加超时自动取消任务）才能重新上架。**传 `matchId` 时价格从撮合单读取（双方已确认），前端不能传价格** | 登录 |
 | POST | `/api/orders/{orderId}/pay` | 模拟支付（校园内平台不接真实支付），状态 → 待发货/待评价 | 买家 |
 | POST | `/api/orders/{orderId}/deliver` | 发货。body: `{logisticsCompany, logisticsNo}`，仅邮寄订单 | 卖家 |
 | POST | `/api/orders/{orderId}/confirm` | 确认收货 → 待评价 | 买家 |
@@ -177,6 +177,17 @@
 | POST | `/api/ai/search/parse` | **检索意图解析**：自然语言 → 结构化检索槽位。body: `{query}`；返回 `{keyword, categoryId, priceMin, priceMax, conditionLevel, campus, tradeType, sortBy, source}`，前端回显到搜索栏且用户可改 | 免登录 |
 | GET | `/api/items/nl-search` | **自然语言检索**：服务端完成「解析槽位 → 查询 → 重排」。query 同 `/api/items` 且额外支持 `nl=<自然语言>`；返回分页结果，每条带 `matchReason`（重排理由） | 免登录 |
 | POST | `/api/ai/feedback` | **采纳反馈**：body: `{suggestionType: publish_draft\|search_query, accepted, suggestedValue, finalValue, targetId?, logId?}`。这是采纳率指标的采集入口 | 登录 |
+| GET | `/api/ai/features` | **技术升级能力总览**：文本模型/多模态/知识库索引是否可用，返回 `{textAvailable, visionAvailable, visionModel, visionReason, ragReady, ragChunkCount, matchAvailable, matchMode, dailyQuota, userQps}` | 免登录 |
+| POST | `/api/ai/pricing/estimate` | **视觉定价**：body: `{title?, description?, categoryId?, conditionLevel?, images[], askingPrice?}`；返回 `{estimateId, conditionGrade, priceLow, priceMid, priceHigh, confidence, reasons[], sampleCount, basis, source, degradeNote}`。只给建议，不自动改商品 | 登录 |
+| POST | `/api/ai/qa` | **RAG 知识库问答**：body: `{question}`；返回 `{answer, citations:[{ref, docId, docTitle, category, chunkNo, snippet, score}], inScope, hitCount, source, degradeNote}`；无命中时 `inScope=false` 且拒答 | 登录 |
+| POST | `/api/ai/matches` | **发起智能撮合**：body: `{itemId, budgetMin?, budgetMax?, demandText, preferredTime?, preferredPlace?, tradeType?}`；同步跑完最多 3 轮协商，返回完整消息；达成只是建议 | 登录 |
+| GET | `/api/ai/matches` | 我的撮合列表。query: `role=buyer\|seller`，最近 50 条 | 登录 |
+| GET | `/api/ai/matches/{matchId}` | 撮合详情（含消息时间线、双方确认状态） | 参与双方或管理员 |
+| POST | `/api/ai/matches/{matchId}/confirm` | 确认/拒绝撮合建议。body: `{accepted, note?}`；双方都确认才进入「已达成」 | 参与双方 |
+| POST | `/api/ai/matches/{matchId}/cancel` | 取消撮合（协商中/待确认） | 参与双方 |
+| GET | `/api/admin/ai/knowledge` | 知识库状态：文档、切片、维度与不可用原因 | 管理员 |
+| POST | `/api/admin/ai/knowledge/reindex` | 重建知识库索引（改完规则正文后调用） | 管理员 |
+| GET | `/api/admin/ai/upgrade/stats` | 技术升级统计：估价/采纳/撮合/知识库 + 多模态可用性 | 管理员 |
 | GET | `/api/admin/ai/metrics` | AI 效果面板：各场景调用量/成功率/降级率、P50/P95/P99 耗时、累计估算成本、发布建议采纳率 | 管理员 |
 | POST | `/api/admin/ai/moderate` | 内容风险预判（发布/评价提交前调用）。body: `{targetType, content, targetId?}`；返回 `{riskLevel, riskCategories, reason, autoReject, source}` | 管理员 |
 | GET | `/api/admin/ai/moderation` | 审核结论分页：query `targetType, riskLevel` | 管理员 |
@@ -189,7 +200,9 @@
 |---|---|---|
 | `/` | 首页（瀑布流 + 分类 + 公告） | `/api/categories`、`/api/items`、`/api/notices` |
 | `/search` | 搜索结果 | `/api/items` |
-| `/item/:id` | 商品详情 | `/api/items/{id}`、`/api/favorites/check/{id}`、`/api/messages/conversations`、`/api/orders` |
+| `/item/:id` | 商品详情 | `/api/items/{id}`、`/api/favorites/check/{id}`、`/api/messages/conversations`、`/api/orders`、`/api/ai/matches` |
+| `/qa` | 智能问答 | `/api/ai/qa`、`/api/ai/features` |
+| `/matches` | 我的撮合 | `/api/ai/matches`、`/api/ai/matches/{id}`、`/api/ai/matches/{id}/confirm`、`/api/ai/matches/{id}/cancel` |
 | `/publish` | 发布闲置 | `/api/upload/images`、`/api/items` |
 | `/messages` | 私信列表 | `/api/messages/conversations` |
 | `/chat/:id` | 聊天窗口 | `/api/messages/conversations/{id}`、`/api/messages/conversations/{id}/messages`、`/api/messages/send` |

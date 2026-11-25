@@ -54,7 +54,8 @@ class ItemPublishLimitTest {
         ItemImageMapper itemImageMapper = mock(ItemImageMapper.class);
         FavoriteMapper favoriteMapper = mock(FavoriteMapper.class);
 
-        itemService = new ItemService(itemMapper, itemImageMapper, favoriteMapper, userMapper);
+        itemService = new ItemService(itemMapper, itemImageMapper, favoriteMapper, userMapper,
+                mock(com.bobo.ai.pricing.PricingService.class));
 
         User seller = new User();
         seller.setUserId(2L);
@@ -79,7 +80,7 @@ class ItemPublishLimitTest {
 
     private static Dtos.ItemDTO draft(String title) {
         return new Dtos.ItemDTO(title, "描述", new BigDecimal("99.00"), null, 1L,
-                "95新", 0, "东校区", "三食堂门口", java.util.List.of());
+                "95新", 0, "东校区", "三食堂门口", java.util.List.of(), null);
     }
 
     @Test

@@ -48,6 +48,27 @@ public class Item implements Serializable {
     /** 成色 */
     private String conditionLevel;
 
+    // ------------------------------------------------------------------
+    // AI 定价与成色建议（技术升级模块二）
+    // 只有卖家在发布/编辑时明确「采用建议」，这些字段才会被写入；
+    // 用 ai_ 前缀与卖家自述字段区分，前端可标注「AI 评估」而不是冒充人工描述。
+    // ------------------------------------------------------------------
+
+    /** AI 评估成色（与 conditionLevel 同枚举） */
+    private String aiConditionGrade;
+
+    /** AI 建议价（区间中值，仅建议） */
+    private BigDecimal aiSuggestedPrice;
+
+    private BigDecimal aiPriceLow;
+    private BigDecimal aiPriceHigh;
+
+    /** 建议来源：model 模型 / rule 规则 */
+    private String aiPriceSource;
+
+    /** 卖家采纳时间 */
+    private LocalDateTime aiPriceTime;
+
     /** 0 都支持 / 1 仅当面 / 2 仅邮寄 */
     private Integer tradeType;
 

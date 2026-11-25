@@ -27,6 +27,10 @@
             <span>发布闲置</span>
           </router-link>
 
+          <router-link to="/qa" class="icon-btn" title="智能问答">
+            <el-icon :size="20"><QuestionFilled /></el-icon>
+          </router-link>
+
           <router-link to="/messages" class="icon-btn" title="消息">
             <el-badge :value="userStore.unreadMessage" :hidden="!userStore.unreadMessage" :max="99">
               <el-icon :size="20"><ChatDotRound /></el-icon>
@@ -48,6 +52,8 @@
               <el-dropdown-menu>
                 <el-dropdown-item command="me" :icon="User">个人中心</el-dropdown-item>
                 <el-dropdown-item command="my-items" :icon="Goods">我的发布</el-dropdown-item>
+                <el-dropdown-item command="matches" :icon="Connection">我的撮合</el-dropdown-item>
+                <el-dropdown-item command="qa" :icon="QuestionFilled">智能问答</el-dropdown-item>
                 <el-dropdown-item command="orders" :icon="List">我的订单</el-dropdown-item>
                 <el-dropdown-item command="favorites" :icon="Star">我的想要</el-dropdown-item>
                 <el-dropdown-item v-if="userStore.isAdmin" command="admin" :icon="Setting" divided>
@@ -102,7 +108,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Bell, ChatDotRound, Goods, HomeFilled, List, Plus, Search, Setting, Star, SwitchButton, User } from '@element-plus/icons-vue'
+import { Bell, ChatDotRound, Connection, Goods, HomeFilled, List, Plus, QuestionFilled, Search, Setting, Star, SwitchButton, User } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { LOGO, avatarOf } from '@/utils/format'
 

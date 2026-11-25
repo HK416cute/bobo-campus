@@ -83,8 +83,8 @@ bobo:
     # 未配置时视为「无 AI」，走规则降级。生产用环境变量 BOBO_AI_API_KEY 注入，不要写进仓库。
     api-key: ${BOBO_AI_API_KEY:}
     base-url: ${BOBO_AI_BASE_URL:https://api.deepseek.com}
-    # deepseek-chat（通用便宜）/ deepseek-reasoner（推理，更慢更贵）
-    model: ${BOBO_AI_MODEL:deepseek-chat}
+    # 对话模型：deepseek-flash（通用且原生支持图像输入）/ deepseek-v4-pro（推理更强）
+    model: ${BOBO_AI_MODEL:deepseek-flash}
     timeout-ms: ${BOBO_AI_TIMEOUT_MS:15000}
     max-attempts: ${BOBO_AI_MAX_ATTEMPTS:1}
     # 结构化抽取要稳定，温度调低
@@ -99,6 +99,18 @@ bobo:
       # 元 / 百万 token，仅用于流水里估算成本；换模型时按官方价目表改这里，不改代码
       input-per-million: ${BOBO_AI_PRICE_INPUT:2.0}
       output-per-million: ${BOBO_AI_PRICE_OUTPUT:8.0}
+    # ---------------------------------------------------------------------
+    # 多模态（智能定价/成色）与多轮撮合：继续使用 DeepSeek 同一套 Key / Base URL。
+    # deepseek-flash 原生支持图片输入（base64 / URL / Files API），无需第二家厂商。
+    # 未配置 Key 或关闭多模态时，定价走规则兜底，应用照常启动。
+    # ---------------------------------------------------------------------
+    vision-enabled: ${BOBO_AI_VISION_ENABLED:true}
+    vision-model: ${BOBO_AI_VISION_MODEL:deepseek-flash}
+    vision-max-tokens: ${BOBO_AI_VISION_MAX_TOKENS:900}
+    vision-timeout-ms: ${BOBO_AI_VISION_TIMEOUT_MS:30000}
+    # 多轮撮合：最大轮次 + 端到端预算。超时后不再调模型，直接用规则收尾
+    match-max-rounds: ${BOBO_AI_MATCH_ROUNDS:3}
+    match-timeout-ms: ${BOBO_AI_MATCH_TIMEOUT_MS:30000}
 
 # 接口文档
 springdoc:

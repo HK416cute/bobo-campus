@@ -76,9 +76,32 @@ public class AiItemContextService {
         return new PriceStats(low, mid, high, prices.size(), basis);
     }
 
+    /**
+     * 统计某分类最近 N 天的真实成交价分位（技术升级：视觉定价的历史成交上下文）。
+     *
+     * <p>成交价与在售价分开统计，是因为两者语义不同：
+     * 在售价是「卖家想卖多少」，成交价是「市场认多少」。定价优先参考成交价，
+     * 样本不足时才回落到在售价。样本少于 {@value #MIN_SAMPLE_COUNT} 返回 null，
+     * 不用一两个极端成交价硬算分位。
+     */
+    public PriceStats soldPriceStats(Long categoryId, String categoryName, int days) {
+        if (categoryId == null) {
+            return null;
+        }
+        List<BigDecimal> prices = sortedCopy(itemMapper.selectSoldPrices(categoryId, days, PRICE_SAMPLE_LIMIT));
+        if (prices.size() < MIN_SAMPLE_COUNT) {
+            return null;
+        }
+        BigDecimal low = percentile(prices, 0.25);
+        BigDecimal mid = percentile(prices, 0.50);
+        BigDecimal high = percentile(prices, 0.75);
+        String basis = "分类「" + (categoryName == null ? categoryId : categoryName) + "」近 "
+                + days + " 天成交 " + prices.size() + " 笔";
+        return new PriceStats(low, mid, high, prices.size(), basis);
+    }
+
     /** 最近在售商品的价格，用于给检索解析提供"这个平台大概什么价位"的印象 */
-    public PriceStats overallPriceStats() {
-        List<BigDecimal> prices = sortedCopy(itemMapper.selectRecentOnSalePrices(PRICE_SAMPLE_LIMIT));
+    public PriceStats overallPriceStats() {        List<BigDecimal> prices = sortedCopy(itemMapper.selectRecentOnSalePrices(PRICE_SAMPLE_LIMIT));
         if (prices.size() < MIN_SAMPLE_COUNT) {
             return null;
         }

@@ -210,6 +210,69 @@
     <el-card shadow="never" class="section">
       <template #header>
         <div class="section-head">
+          <span>技术升级：智能撮合 / 视觉定价 / RAG 知识库</span>
+          <el-button text :icon="Refresh" @click="loadUpgrade">刷新</el-button>
+        </div>
+      </template>
+
+      <div class="upgrade-grid">
+        <div class="upgrade-item">
+          <span>视觉估价</span>
+          <strong>{{ upgradeStats.estimateTotal || 0 }}</strong>
+          <small>采纳 {{ upgradeStats.estimateAdopted || 0 }} 次</small>
+        </div>
+        <div class="upgrade-item">
+          <span>智能撮合</span>
+          <strong>{{ upgradeStats.matchTotal || 0 }}</strong>
+          <small>达成 {{ upgradeStats.matchAgreed || 0 }} 单</small>
+        </div>
+        <div class="upgrade-item">
+          <span>知识库</span>
+          <strong>{{ knowledge.chunkCount || 0 }}</strong>
+          <small>{{ knowledge.docCount || 0 }} 篇文档 / {{ knowledge.dim || 0 }} 维向量</small>
+        </div>
+        <div class="upgrade-item">
+          <span>多模态</span>
+          <strong class="small">{{ upgradeStats.visionAvailable ? '可用' : '规则模式' }}</strong>
+          <small>{{ upgradeStats.visionModel || 'deepseek-flash' }}</small>
+        </div>
+      </div>
+
+      <el-alert
+        v-if="knowledge.warning"
+        type="error"
+        :closable="false"
+        show-icon
+        title="知识库表不可用"
+        :description="knowledge.warning"
+        class="knowledge-warning"
+      />
+
+      <div class="knowledge-head">
+        <span>知识库文档（{{ knowledge.docCount || 0 }} 篇 / {{ knowledge.chunkCount || 0 }} 个片段）</span>
+        <el-button type="primary" size="small" :loading="reindexing" @click="reindexKnowledge">
+          重建索引
+        </el-button>
+      </div>
+      <el-table :data="knowledge.docs || []" size="small" empty-text="暂无知识库文档">
+        <el-table-column prop="title" label="文档" min-width="220" />
+        <el-table-column prop="category" label="类目" width="100" />
+        <el-table-column prop="chunkCount" label="切片" width="80" />
+        <el-table-column prop="contentLength" label="字数" width="90" />
+        <el-table-column prop="status" label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 0 ? 'success' : 'info'" size="small">
+              {{ row.status === 0 ? '启用' : '停用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="updateTime" label="更新时间" width="170" />
+      </el-table>
+    </el-card>
+
+    <el-card shadow="never" class="section">
+      <template #header>
+        <div class="section-head">
           <span>分场景明细</span>
           <el-button text :icon="Refresh" @click="loadMetrics">刷新</el-button>
         </div>
@@ -347,7 +410,11 @@ const SCENE_TEXT = {
   search_rerank: '检索结果重排',
   moderation: '内容审核',
   admin_report: '运营周报',
-  admin_ask: '运营问答'
+  admin_ask: '运营问答',
+  price_estimate: '视觉定价/成色',
+  match_buyer: '撮合·买家 Agent',
+  match_seller: '撮合·卖家 Agent',
+  rag_qa: 'RAG 知识库问答'
 }
 
 const status = ref(null)
@@ -366,8 +433,8 @@ const testing = ref(false)
 const testResult = ref(null)
 
 const MODEL_OPTIONS = [
-  { label: 'deepseek-chat（通用，便宜快）', value: 'deepseek-chat' },
-  { label: 'deepseek-reasoner（推理，更慢更贵）', value: 'deepseek-reasoner' }
+  { label: 'deepseek-flash（通用，支持图像理解）', value: 'deepseek-flash' },
+  { label: 'deepseek-v4-pro（推理更强，成本更高）', value: 'deepseek-v4-pro' }
 ]
 
 const form = ref({
@@ -375,7 +442,7 @@ const form = ref({
   apiKey: '',
   clearApiKey: false,
   baseUrl: '',
-  model: 'deepseek-chat',
+  model: 'deepseek-flash',
   timeoutMs: 15000,
   maxAttempts: 1,
   temperature: 0.2,
@@ -396,7 +463,7 @@ function applySettings(data) {
   form.value.apiKey = ''
   form.value.clearApiKey = false
   form.value.baseUrl = data?.baseUrl || ''
-  form.value.model = data?.model || 'deepseek-chat'
+  form.value.model = data?.model || 'deepseek-flash'
   form.value.timeoutMs = data?.timeoutMs ?? 15000
   form.value.maxAttempts = data?.maxAttempts ?? 1
   form.value.temperature = data?.temperature ?? 0.2
@@ -550,11 +617,42 @@ async function runModerate() {
   }
 }
 
+const upgradeStats = ref({})
+const knowledge = ref({})
+const reindexing = ref(false)
+
+async function loadUpgrade() {
+  try {
+    upgradeStats.value = await adminApi.aiUpgradeStats()
+  } catch (e) {
+    upgradeStats.value = {}
+  }
+  try {
+    knowledge.value = await adminApi.aiKnowledge()
+  } catch (e) {
+    knowledge.value = {}
+  }
+}
+
+async function reindexKnowledge() {
+  reindexing.value = true
+  try {
+    const result = await adminApi.aiReindexKnowledge()
+    ElMessage.success(`索引已重建：${result.docCount} 篇文档 / ${result.chunkCount} 个片段`)
+    await loadUpgrade()
+  } catch (e) {
+    // http.js 已提示
+  } finally {
+    reindexing.value = false
+  }
+}
+
 onMounted(() => {
   loadSettings()
   loadStatus()
   loadMetrics()
   loadModerationList()
+  loadUpgrade()
 })
 </script>
 
@@ -648,6 +746,54 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
+}
+
+.upgrade-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.upgrade-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--bobo-bg);
+}
+
+.upgrade-item span {
+  font-size: 12px;
+  color: var(--bobo-text-secondary);
+}
+
+.upgrade-item strong {
+  font-size: 22px;
+  color: var(--bobo-text);
+}
+
+.upgrade-item strong.small {
+  font-size: 16px;
+}
+
+.upgrade-item small {
+  font-size: 12px;
+  color: var(--bobo-text-secondary);
+}
+
+.knowledge-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0 8px;
+  font-size: 13px;
+}
+
+.knowledge-warning {
+  margin-bottom: 12px;
 }
 
 .card-label {

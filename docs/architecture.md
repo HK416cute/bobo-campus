@@ -58,7 +58,7 @@ com.bobo
 **DTO 为什么用 record**：请求体只有字段与约束、没有行为，record 天然不可变、`equals/hashCode/toString` 自动生成，
 Jackson 与 `jakarta.validation` 都支持在 record 组件上标注（如 `@NotBlank String title`），比 20 行 getter/setter 更短，
 且「哪些字段可被客户端传」一眼可见；列表查询条件仍用可变类 `XxxQuery`，因为要承载 MyBatis-Plus 的默认值与 setter。
-**为什么单模块**：只有 12 张表、十几个 service，拆成 `common/system/web` 后每次改动都要过模块依赖与编译顺序，收益（编译隔离、复用）
+**为什么单模块**：只有二十来张表、十几个 service，拆成 `common/system/web` 后每次改动都要过模块依赖与编译顺序，收益（编译隔离、复用）
 在「部署一次构建一次」的节奏下几乎为零；包已按层分好，真要拆按 `com.bobo.<模块>` 切一刀即可（见第十节）。
 
 ## 三、鉴权设计
@@ -315,7 +315,7 @@ Jackson 与 `jakarta.validation` 都支持在 record 组件上标注（如 `@Not
 出现「首页显示已售、详情显示未知」。集中后与后端 `Item`/`Order` 常量一一对应，配合 `scripts/check-contract.mjs`
 这类静态校验，能让契约漂移在提交前被发现；纯函数便于单测，也不引入组件依赖。
 
-## 十、AI 能力（Spring AI + DeepSeek）
+## 十、AI 能力（DeepSeek 文本 + 多模态）
 
 AI 在本项目里的定位是**可选增强，不是启动依赖**：`bobo.ai.enabled=false` 或未配置
 `BOBO_AI_API_KEY` 时，`com.bobo.ai` 全层自动降级为规则实现，应用照常启动、现有接口行为不变。
@@ -333,10 +333,22 @@ AI 在本项目里的定位是**可选增强，不是启动依赖**：`bobo.ai.e
    进而使"按 user_id 计数的每日配额"永久失效。同理，`@Async` 不能同类自调用（代理失效 → 假异步），
    所以异步写库单独放在 `AiCallLogWriter`。
 
-**为什么不做 embedding / 向量库 / RAG**：DeepSeek 不提供 embedding 接口，
-硬上需再引一家厂商 + Redis Stack，而本场景候选集只有几百条，SQL 过滤已足够。
-因此自然语言检索的实现是「**LLM 解析检索槽位 → 喂现有 MyBatis-Plus 查询 → LLM 重排 top-N**」，
-文档与简历都按这个措辞写，不冒充向量检索。
+**2026-11 技术升级新增的三大模块**（设计细节见 [ai-upgrade.md](ai-upgrade.md)）：
+
+| 模块 | 关键类 | 入口 | 无模型时 |
+|---|---|---|---|
+| 多智能体撮合 | `ai/match/MatchService`、`MatchRuleEngine`、`MatchContextService` | `/api/ai/matches`、`/matches` | 规则协商 |
+| 视觉定价与成色 | `ai/pricing/PricingService`、`ai/vision/DeepSeekVisionInvoker` | `/api/ai/pricing/estimate`、发布页 | 价位分位 × 成色系数 |
+| RAG 知识库问答 | `ai/rag/RagService`、`KnowledgeRetriever`、`LocalHashEmbeddingProvider` | `/api/ai/qa`、`/qa` | 原文摘录 |
+
+三者都复用 `AiExecutor` 的门控/限流/配额/流水，新增的视觉调用通过
+`AiExecutor.executeVision(...)` 进入同一条链路，不允许绕过。
+
+**RAG 的取舍（原「不做」已升级）**：DeepSeek 仍不提供 embedding 端点，因此没有引
+Chroma/Qdrant/Redis Stack，而是用**本地 512 维哈希向量 + MySQL** 做召回，
+DeepSeek 只负责基于片段生成并强制返回引用。代价是语义泛化弱于真向量模型
+（同义词召回差），但换来单 Jar 部署、零外部依赖与完全可测试；需要更强语义时
+替换 `EmbeddingProvider` 即可，检索与问答链路不变。
 
 ## 十一、扩展点
 
@@ -365,8 +377,9 @@ AI 在本项目里的定位是**可选增强，不是启动依赖**：`bobo.ai.e
 
 ### 已完成的两项修复（如看到旧笔记提到，可忽略）
 
-- **演示账号密码**：`mysql/init/02-seed.sql` 里的散列已改为后端使用的 PBKDF2 格式
-  （`pbkdf2$sha256$120000$<salt>$<hash>`），初始化后 `admin / password` 等账号可直接登录。
+- **账号密码散列**：`mysql/init/02-seed.sql` 里的散列已改为后端使用的 PBKDF2 格式
+  （`pbkdf2$sha256$120000$<salt>$<hash>`），初始化后 `admin / password` 可直接登录；
+  HK416（`2330090307`）的种子初始密码同为 `password`，上线后应立即修改。
   需要生成新散列时用内置工具（详见 [deploy.md](deploy.md) 的运维一节）：
   `java -jar bobo-server.jar --bobo.password-tool=<新密码> --bobo.password-user=<账号>`。
 - **`bobo_user.password` 列注释**：已从「BCrypt 密码散列」更正为 PBKDF2 说明。

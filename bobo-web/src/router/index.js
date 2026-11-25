@@ -88,6 +88,18 @@ const routes = [
         meta: { title: '消息通知', activeMenu: 'me', requiresAuth: true }
       },
       {
+        path: 'matches',
+        name: 'matches',
+        component: () => import('@/views/MatchesView.vue'),
+        meta: { title: '我的撮合', activeMenu: 'me', requiresAuth: true }
+      },
+      {
+        path: 'qa',
+        name: 'qa',
+        component: () => import('@/views/QaView.vue'),
+        meta: { title: '智能问答', activeMenu: 'me', requiresAuth: true }
+      },
+      {
         path: 'me',
         name: 'me',
         component: () => import('@/views/MineView.vue'),

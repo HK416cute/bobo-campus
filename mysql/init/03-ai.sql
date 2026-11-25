@@ -22,10 +22,10 @@ SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS `bobo_ai_call_log`;
 CREATE TABLE `bobo_ai_call_log` (
   `log_id`            BIGINT        NOT NULL AUTO_INCREMENT COMMENT '流水ID',
-  `scene`             VARCHAR(32)   NOT NULL                COMMENT '场景：publish_draft/search_parse/search_rerank/moderation/admin_report/admin_ask',
+  `scene`             VARCHAR(32)   NOT NULL                COMMENT '场景：publish_draft/search_parse/search_rerank/moderation/admin_report/admin_ask/price_estimate/match_buyer/match_seller/rag_qa',
   `user_id`           BIGINT                 DEFAULT NULL   COMMENT '触发用户ID，匿名或后台任务为空',
-  `provider`          VARCHAR(32)            DEFAULT NULL   COMMENT '调用器实现：spring-ai-deepseek/noop',
-  `model`             VARCHAR(64)            DEFAULT NULL   COMMENT '模型名：deepseek-chat/deepseek-reasoner',
+  `provider`          VARCHAR(32)            DEFAULT NULL   COMMENT '调用器实现：spring-ai-deepseek/deepseek-vision/noop',
+  `model`             VARCHAR(64)            DEFAULT NULL   COMMENT '模型名：deepseek-flash/deepseek-v4-pro',
   `input_hash`        VARCHAR(32)            DEFAULT NULL   COMMENT '输入摘要（SHA-256 前16位），用于去重与缓存判定',
   `output_hash`       VARCHAR(32)            DEFAULT NULL   COMMENT '输出摘要，用于识别重复建议',
   `prompt_tokens`     INT                    DEFAULT NULL   COMMENT '输入token数，供应商未返回则为NULL（不记0，避免成本失真）',

@@ -132,7 +132,23 @@ export const aiApi = {
   /** 检索意图解析：自然语言 → 结构化检索槽位 */
   parseSearch: (query) => request.post('/api/ai/search/parse', { query }),
   /** 采纳反馈：采纳率指标的采集入口 */
-  feedback: (data) => request.post('/api/ai/feedback', data)
+  feedback: (data) => request.post('/api/ai/feedback', data),
+
+  // ---- 技术升级：智能定价 / RAG 问答 / 智能撮合 ----
+  /** 能力总览：文本模型、多模态、知识库索引是否可用 */
+  features: () => request.get('/api/ai/features'),
+  /** 视觉定价：图片 + 描述 → 成色与建议价格区间（看图可能超过默认 20s，单独放宽） */
+  estimatePricing: (data) => request.post('/api/ai/pricing/estimate', data, { timeout: 60000 }),
+  /** RAG 知识库问答（带引用） */
+  ask: (question) => request.post('/api/ai/qa', { question }, { timeout: 45000 }),
+  /** 发起智能撮合（同步跑完多轮协商，最多 30 秒，超时时间必须大于后端预算） */
+  createMatch: (data) => request.post('/api/ai/matches', data, { timeout: 60000 }),
+  /** 我的撮合列表：role=buyer / seller */
+  matches: (role = 'buyer') => request.get('/api/ai/matches', { role }),
+  matchDetail: (matchId) => request.get(`/api/ai/matches/${matchId}`),
+  /** 确认/拒绝撮合建议：双方都确认后才生效 */
+  confirmMatch: (matchId, data) => request.post(`/api/ai/matches/${matchId}/confirm`, data),
+  cancelMatch: (matchId) => request.post(`/api/ai/matches/${matchId}/cancel`)
 }
 
 // ------------------------------------------------------------------ 管理端
@@ -197,5 +213,11 @@ export const adminApi = {
   /** 保存 AI 模型配置：留空字段 = 不修改；保存后立即生效，无需重启容器 */
   aiSaveSettings: (data) => request.put('/api/admin/ai/settings', data),
   /** 连通性测试：真发一次最小请求，验证 Key 与地址是否可用 */
-  aiTestSettings: (model) => request.post('/api/admin/ai/settings/test', { model: model || null })
+  aiTestSettings: (model) => request.post('/api/admin/ai/settings/test', { model: model || null }),
+  /** 知识库状态：文档数、切片数、维度与不可用原因 */
+  aiKnowledge: () => request.get('/api/admin/ai/knowledge'),
+  /** 重建知识库索引（改完规则正文后点一次） */
+  aiReindexKnowledge: () => request.post('/api/admin/ai/knowledge/reindex'),
+  /** 技术升级统计：估价/采纳/撮合/知识库 + 多模态可用性 */
+  aiUpgradeStats: () => request.get('/api/admin/ai/upgrade/stats')
 }

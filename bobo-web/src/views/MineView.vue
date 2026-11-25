@@ -51,35 +51,64 @@
 
       <!-- 功能入口 -->
       <div class="bobo-card">
-        <el-cell-group :border="false">
-          <el-cell title="我的发布" label="管理在售、已售与审核状态" is-link @click="$router.push('/my-items')">
-            <template #icon><el-icon><Goods /></el-icon></template>
-          </el-cell>
-          <el-cell title="我的想要" label="收藏的宝贝" is-link @click="$router.push('/favorites')">
-            <template #icon><el-icon><Star /></el-icon></template>
-          </el-cell>
-          <el-cell title="我的订单" label="买到的与卖出的订单" is-link @click="$router.push('/orders')">
-            <template #icon><el-icon><List /></el-icon></template>
-          </el-cell>
-          <el-cell title="收货地址" label="邮寄交易使用" is-link @click="$router.push('/me/addresses')">
-            <template #icon><el-icon><Location /></el-icon></template>
-          </el-cell>
-          <el-cell title="消息通知" is-link @click="$router.push('/notices')">
-            <template #icon><el-icon><Bell /></el-icon></template>
-            <template #value>
-              <el-badge :value="userStore.unreadNotice" :hidden="!userStore.unreadNotice" :max="99" />
-            </template>
-          </el-cell>
-          <el-cell
-            v-if="user?.verifyStatus !== 2"
-            title="学生认证"
-            label="认证后主页展示认证标识，更受信任"
-            is-link
-            @click="verifyVisible = true"
-          >
-            <template #icon><el-icon><Medal /></el-icon></template>
-          </el-cell>
-        </el-cell-group>
+        <div class="cell-group">
+          <div class="cell" @click="$router.push('/my-items')">
+            <el-icon class="cell-icon"><Goods /></el-icon>
+            <div class="cell-body">
+              <div class="cell-title">我的发布</div>
+              <div class="cell-label">管理在售、已售与审核状态</div>
+            </div>
+            <el-icon class="cell-arrow"><ArrowRight /></el-icon>
+          </div>
+
+          <div class="cell" @click="$router.push('/favorites')">
+            <el-icon class="cell-icon"><Star /></el-icon>
+            <div class="cell-body">
+              <div class="cell-title">我的想要</div>
+              <div class="cell-label">收藏的宝贝</div>
+            </div>
+            <el-icon class="cell-arrow"><ArrowRight /></el-icon>
+          </div>
+
+          <div class="cell" @click="$router.push('/orders')">
+            <el-icon class="cell-icon"><List /></el-icon>
+            <div class="cell-body">
+              <div class="cell-title">我的订单</div>
+              <div class="cell-label">买到的与卖出的订单</div>
+            </div>
+            <el-icon class="cell-arrow"><ArrowRight /></el-icon>
+          </div>
+
+          <div class="cell" @click="$router.push('/me/addresses')">
+            <el-icon class="cell-icon"><Location /></el-icon>
+            <div class="cell-body">
+              <div class="cell-title">收货地址</div>
+              <div class="cell-label">邮寄交易使用</div>
+            </div>
+            <el-icon class="cell-arrow"><ArrowRight /></el-icon>
+          </div>
+
+          <div class="cell" @click="$router.push('/notices')">
+            <el-icon class="cell-icon"><Bell /></el-icon>
+            <div class="cell-body">
+              <div class="cell-title">消息通知</div>
+            </div>
+            <el-badge :value="userStore.unreadNotice" :hidden="!userStore.unreadNotice" :max="99" />
+            <el-icon class="cell-arrow"><ArrowRight /></el-icon>
+          </div>
+
+          <div class="cell" @click="openVerify">
+            <el-icon class="cell-icon"><Medal /></el-icon>
+            <div class="cell-body">
+              <div class="cell-title">学生认证</div>
+              <div class="cell-label">{{ verifyHint }}</div>
+            </div>
+            <span v-if="user?.verifyStatus === 2" class="cell-status success">已认证</span>
+            <span v-else-if="user?.verifyStatus === 1" class="cell-status warning">审核中</span>
+            <span v-else-if="user?.verifyStatus === 3" class="cell-status danger">已驳回</span>
+            <el-icon class="cell-arrow"><ArrowRight /></el-icon>
+          </div>
+        </div>
 
         <el-divider />
 
@@ -139,7 +168,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Bell, Goods, List, Location, Medal, Star } from '@element-plus/icons-vue'
+import { ArrowRight, Bell, Goods, List, Location, Medal, Star } from '@element-plus/icons-vue'
 import { authApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { avatarOf } from '@/utils/format'
@@ -156,6 +185,33 @@ const verifyForm = reactive({ studentNo: '', college: '' })
 const passwordForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
 
 const user = computed(() => userStore.user)
+
+const verifyHint = computed(() => {
+  switch (user.value?.verifyStatus) {
+    case 2:
+      return '已完成学生认证'
+    case 1:
+      return '认证审核中，请等待管理员处理'
+    case 3:
+      return '认证被驳回，可修改学号/学院后重新提交'
+    default:
+      return '认证后主页展示认证标识，更受信任'
+  }
+})
+
+function openVerify() {
+  if (user.value?.verifyStatus === 2) {
+    ElMessage.info('你已完成学生认证')
+    return
+  }
+  if (user.value?.verifyStatus === 1) {
+    ElMessage.info('认证审核中，请等待管理员处理')
+    return
+  }
+  verifyForm.studentNo = userStore.user?.studentNo || verifyForm.studentNo
+  verifyForm.college = userStore.user?.college || verifyForm.college
+  verifyVisible.value = true
+}
 
 onMounted(async () => {
   await userStore.fetchUser(true)
@@ -307,6 +363,74 @@ async function logout() {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+/* 功能列表：Element Plus 没有 el-cell，这里用普通 div 实现，避免未知组件不渲染 */
+.cell-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 2px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.cell:last-child {
+  border-bottom: none;
+}
+
+.cell:hover {
+  background: var(--el-fill-color-lighter);
+}
+
+.cell-icon {
+  flex: none;
+  font-size: 20px;
+  color: var(--bobo-text);
+}
+
+.cell-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.cell-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--bobo-text);
+}
+
+.cell-label {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--bobo-text-secondary);
+}
+
+.cell-arrow {
+  flex: none;
+  color: var(--el-text-color-placeholder);
+}
+
+.cell-status {
+  flex: none;
+  font-size: 12px;
+}
+
+.cell-status.success {
+  color: var(--el-color-success);
+}
+
+.cell-status.warning {
+  color: var(--el-color-warning);
+}
+
+.cell-status.danger {
+  color: var(--el-color-danger);
 }
 
 @media (max-width: 768px) {

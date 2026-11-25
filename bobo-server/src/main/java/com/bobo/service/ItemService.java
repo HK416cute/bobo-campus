@@ -62,6 +62,7 @@ public class ItemService {
     private final ItemImageMapper itemImageMapper;
     private final FavoriteMapper favoriteMapper;
     private final UserMapper userMapper;
+    private final com.bobo.ai.pricing.PricingService pricingService;
 
     /**
      * NotificationService 依赖 AuthService，而本类也需要通知能力；
@@ -139,6 +140,13 @@ public class ItemService {
 
         Item item = new Item();
         fill(item, dto);
+        // 卖家显式「采用 AI 估价」时才写入建议字段；未采用时字段保持 NULL，
+        // 商品详情的成色/价格仍以卖家填写为准。
+        com.bobo.ai.pricing.PricingService.Adoption adoption =
+                pricingService.resolveAdoption(dto.aiEstimateId(), userId, null);
+        if (adoption != null) {
+            applyAiPrice(item, adoption);
+        }
         item.setSellerId(userId);
         item.setCampus(StringUtils.hasText(dto.campus()) ? dto.campus().trim()
                 : (user == null ? null : user.getCampus()));
@@ -152,6 +160,9 @@ public class ItemService {
         itemMapper.insert(item);
 
         saveImages(item.getItemId(), images);
+        if (adoption != null) {
+            pricingService.markAdopted(adoption.estimateId(), item.getItemId(), userId);
+        }
         return item.getItemId();
     }
 
@@ -164,6 +175,12 @@ public class ItemService {
         }
 
         fill(item, dto);
+        // 编辑时也可以重新采用一次估价；同一商品重复保存不会误判“已被使用”
+        com.bobo.ai.pricing.PricingService.Adoption adoption =
+                pricingService.resolveAdoption(dto.aiEstimateId(), AuthContext.userId(), itemId);
+        if (adoption != null) {
+            applyAiPrice(item, adoption);
+        }
         if (StringUtils.hasText(dto.campus())) {
             item.setCampus(dto.campus().trim());
         }
@@ -183,6 +200,9 @@ public class ItemService {
         if (!images.isEmpty()) {
             itemImageMapper.deleteByItemId(itemId);
             saveImages(itemId, images);
+        }
+        if (adoption != null) {
+            pricingService.markAdopted(adoption.estimateId(), itemId, AuthContext.userId());
         }
     }
 
@@ -354,6 +374,15 @@ public class ItemService {
             throw BizException.forbidden("只能操作自己发布的商品");
         }
         return item;
+    }
+
+    private void applyAiPrice(Item item, com.bobo.ai.pricing.PricingService.Adoption adoption) {
+        item.setAiConditionGrade(adoption.conditionGrade());
+        item.setAiSuggestedPrice(adoption.priceMid());
+        item.setAiPriceLow(adoption.priceLow());
+        item.setAiPriceHigh(adoption.priceHigh());
+        item.setAiPriceSource(adoption.source());
+        item.setAiPriceTime(java.time.LocalDateTime.now());
     }
 
     private void fill(Item item, Dtos.ItemDTO dto) {

@@ -39,6 +39,16 @@ public class AiCallLog implements Serializable {
     public static final String SCENE_ADMIN_REPORT = "admin_report";
     public static final String SCENE_ADMIN_ASK = "admin_ask";
 
+    // --- 技术升级新增场景：三个模块各自独立统计成功率/成本，便于回答“钱花在哪” ---
+    /** 视觉定价与成色评估（DeepSeek 多模态） */
+    public static final String SCENE_PRICE_ESTIMATE = "price_estimate";
+    /** 撮合中的买家 Agent 出价/还价 */
+    public static final String SCENE_MATCH_BUYER = "match_buyer";
+    /** 撮合中的卖家 Agent 响应 */
+    public static final String SCENE_MATCH_SELLER = "match_seller";
+    /** RAG 知识库问答 */
+    public static final String SCENE_RAG_QA = "rag_qa";
+
     @TableId(value = "log_id", type = IdType.AUTO)
     private Long logId;
 

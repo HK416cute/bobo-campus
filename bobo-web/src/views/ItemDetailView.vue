@@ -58,6 +58,9 @@
             <div class="price-line">
               <span class="price"><small>¥</small>{{ priceParts(item.price).int }}<small>.{{ priceParts(item.price).decimal }}</small></span>
               <span v-if="item.originalPrice" class="original">原价 ¥{{ money(item.originalPrice) }}</span>
+              <el-tag v-if="matchPrice" type="danger" effect="dark" round>
+                已谈妥 ¥{{ money(matchPrice) }}
+              </el-tag>
               <el-tag :type="ITEM_STATUS[item.status]?.type" effect="light" round>
                 {{ ITEM_STATUS[item.status]?.text }}
               </el-tag>
@@ -112,6 +115,9 @@
                   {{ favorited ? '已想要' : '想要' }}
                 </el-button>
                 <el-button :icon="ChatDotRound" @click="chat">聊一聊</el-button>
+                <el-button :icon="Connection" :disabled="item.status !== 1" @click="openMatch">
+                  智能撮合
+                </el-button>
                 <el-button
                   type="primary"
                   class="bobo-btn-primary buy"
@@ -152,6 +158,15 @@
 
     <!-- 下单弹窗 -->
     <el-dialog v-model="orderVisible" title="确认交易信息" width="520px">
+      <el-alert
+        v-if="activeMatchId"
+        type="success"
+        :closable="false"
+        show-icon
+        :title="`本单使用智能撮合价 ¥${money(matchPrice)}（买卖双方已确认）`"
+        description="提交订单后撮合单立即失效，不能重复使用。"
+        class="match-price-alert"
+      />
       <el-form :model="orderForm" label-width="92px">
         <el-form-item label="交易方式">
           <el-radio-group v-model="orderForm.tradeType">
@@ -194,7 +209,8 @@
         </el-form-item>
 
         <el-form-item label="订单金额">
-          <span class="bobo-price total">{{ money(item?.price) }}</span>
+          <span class="bobo-price total">{{ money(activeMatchId ? matchPrice : item?.price) }}</span>
+          <span v-if="activeMatchId" class="match-tip">撮合价</span>
         </el-form-item>
       </el-form>
 
@@ -202,6 +218,74 @@
         <el-button @click="orderVisible = false">再想想</el-button>
         <el-button type="primary" class="bobo-btn-primary" :loading="submitting" @click="submitOrder">
           确认下单
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 智能撮合：买家给出预算与诉求，两个 Agent 多轮协商，结果仍需双方确认 -->
+    <el-dialog v-model="matchVisible" title="发起智能撮合" width="580px">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="买家 Agent 会先分析商品与行情，再与卖家 Agent 协商价格"
+        description="最多 3 轮、约 30 秒。达成后只是「建议」，买卖双方各自确认后，你才能按撮合价下单。"
+      />
+      <el-form label-width="92px" class="match-form">
+        <el-form-item label="预算范围">
+          <div class="budget-row">
+            <el-input-number
+              v-model="matchForm.budgetMin"
+              :min="1"
+              :max="999999"
+              :precision="2"
+              :controls="false"
+              placeholder="最低"
+            />
+            <span>~</span>
+            <el-input-number
+              v-model="matchForm.budgetMax"
+              :min="1"
+              :max="999999"
+              :precision="2"
+              :controls="false"
+              placeholder="最高"
+            />
+            <span class="bobo-muted">不填则由 Agent 按商品价估算</span>
+          </div>
+        </el-form-item>
+        <el-form-item label="求购诉求" required>
+          <el-input
+            v-model="matchForm.demandText"
+            type="textarea"
+            :rows="3"
+            maxlength="500"
+            show-word-limit
+            placeholder="例如：周末当面交易，希望含原装充电器，价格合适今天就能定"
+          />
+        </el-form-item>
+        <el-form-item label="期望时间">
+          <el-input v-model="matchForm.preferredTime" maxlength="64" placeholder="如：周六下午" />
+        </el-form-item>
+        <el-form-item label="期望地点">
+          <el-input v-model="matchForm.preferredPlace" maxlength="128" placeholder="如：三食堂门口" />
+        </el-form-item>
+        <el-form-item label="交易方式">
+          <el-radio-group v-model="matchForm.tradeType">
+            <el-radio :value="1" :disabled="item?.tradeType === 2">当面交易</el-radio>
+            <el-radio :value="2" :disabled="item?.tradeType === 1">邮寄</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="matchVisible = false">再想想</el-button>
+        <el-button
+          type="primary"
+          class="bobo-btn-primary"
+          :loading="matchStarting"
+          @click="startMatch"
+        >
+          {{ matchStarting ? 'Agent 协商中，请稍候…' : '开始协商' }}
         </el-button>
       </template>
     </el-dialog>
@@ -219,8 +303,8 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ChatDotRound, InfoFilled, Star } from '@element-plus/icons-vue'
-import { addressApi, favoriteApi, itemApi, messageApi, orderApi } from '@/api'
+import { ChatDotRound, Connection, InfoFilled, Star } from '@element-plus/icons-vue'
+import { addressApi, aiApi, favoriteApi, itemApi, messageApi, orderApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { ITEM_STATUS, TRADE_TYPE, avatarOf, coverOf, money, priceParts } from '@/utils/format'
 
@@ -245,6 +329,22 @@ const orderForm = reactive({
   remark: ''
 })
 
+// ---- 智能撮合（模块一） ----
+const matchVisible = ref(false)
+const matchStarting = ref(false)
+const matchForm = reactive({
+  budgetMin: null,
+  budgetMax: null,
+  demandText: '',
+  preferredTime: '',
+  preferredPlace: '',
+  tradeType: 1
+})
+/** 已双方确认的撮合价；有值时下单使用它 */
+const matchPrice = ref(null)
+const activeMatchId = ref(null)
+const matchInfo = ref(null)
+
 const images = computed(() => {
   const list = item.value?.images?.length ? item.value.images : [coverOf(item.value)]
   return list
@@ -267,8 +367,11 @@ watch(
 async function load() {
   loading.value = true
   activeIndex.value = 0
+  matchPrice.value = null
+  activeMatchId.value = null
+  matchInfo.value = null
   try {
-    userStore.fetchUser()
+    await userStore.fetchUser()
     item.value = await itemApi.detail(route.params.id)
     favorited.value = !!item.value.favorited
     orderForm.tradeType = item.value.tradeType === 2 ? 2 : 1
@@ -278,10 +381,42 @@ async function load() {
         favorited.value = !!res.favorited
       }).catch(() => {})
     }
+    await initMatchFromQuery()
   } catch (e) {
     item.value = null
   } finally {
     loading.value = false
+  }
+}
+
+/**
+ * 从「我的撮合」点「按撮合价下单」过来时，URL 带 matchId。
+ * 这里必须重新向服务端确认：撮合属于当前买家、商品一致、状态是「已达成」，
+ * 不能只信 URL 参数，否则任何人都能拼一个 matchId 来改价。
+ */
+async function initMatchFromQuery() {
+  const raw = route.query.matchId
+  if (!raw || isOwner.value || orderVisible.value) {
+    return
+  }
+  const matchId = Number(raw)
+  if (!matchId) {
+    return
+  }
+  try {
+    const match = await aiApi.matchDetail(matchId)
+    if (match.itemId !== item.value.itemId || match.myRole !== 'buyer') {
+      return
+    }
+    matchInfo.value = match
+    if (match.status === 2 && match.agreedPrice) {
+      activeMatchId.value = match.matchId
+      matchPrice.value = Number(match.agreedPrice)
+      ElMessage.info(`本单使用撮合价 ¥${money(matchPrice.value)}`)
+      openOrder()
+    }
+  } catch (e) {
+    // 撮合不可用时不影响正常浏览与下单
   }
 }
 
@@ -314,6 +449,42 @@ async function chat() {
     router.push(`/chat/${conversation.conversationId}`)
   } catch (e) {
     // 提示由 http.js 处理
+  }
+}
+
+async function openMatch() {
+  if (!userStore.isLogin) {
+    router.push({ path: '/login', query: { redirect: route.fullPath } })
+    return
+  }
+  matchForm.tradeType = item.value.tradeType === 2 ? 2 : 1
+  matchForm.preferredPlace = matchForm.preferredPlace || item.value.location || ''
+  matchVisible.value = true
+}
+
+async function startMatch() {
+  if (!matchForm.demandText.trim()) {
+    ElMessage.warning('请先填写你的求购诉求，Agent 需要它来谈判')
+    return
+  }
+  matchStarting.value = true
+  try {
+    const detail = await aiApi.createMatch({
+      itemId: item.value.itemId,
+      budgetMin: matchForm.budgetMin || null,
+      budgetMax: matchForm.budgetMax || null,
+      demandText: matchForm.demandText.trim(),
+      preferredTime: matchForm.preferredTime || null,
+      preferredPlace: matchForm.preferredPlace || null,
+      tradeType: matchForm.tradeType
+    })
+    matchVisible.value = false
+    ElMessage.success(detail.status === 2 ? '协商达成，等待双方确认' : '协商完成，查看协商记录')
+    router.push({ path: '/matches', query: { id: detail.matchId } })
+  } catch (e) {
+    // http.js 已提示
+  } finally {
+    matchStarting.value = false
   }
 }
 
@@ -359,7 +530,8 @@ async function submitOrder() {
       addressId: orderForm.addressId,
       tradePlace: orderForm.tradePlace,
       tradeTime: orderForm.tradeTime,
-      remark: orderForm.remark
+      remark: orderForm.remark,
+      matchId: activeMatchId.value
     })
     orderVisible.value = false
     ElMessage.success('下单成功，请尽快完成支付')
@@ -395,6 +567,31 @@ async function removeItem() {
 <style scoped>
 .crumb {
   margin-bottom: 14px;
+}
+
+.match-price-alert {
+  margin-bottom: 16px;
+}
+
+.match-form {
+  margin-top: 16px;
+}
+
+.budget-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.budget-row :deep(.el-input-number) {
+  width: 118px;
+}
+
+.match-tip {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--el-color-danger);
 }
 
 .detail {
