@@ -8,7 +8,8 @@
           <span class="name">bobo 校园二手</span>
         </router-link>
 
-        <div class="search">
+        <!-- 首页 banner 已有大搜索框，顶栏搜索只在其他页面显示，避免同屏两个搜索栏 -->
+        <div v-if="route.name !== 'home'" class="search">
           <el-input
             v-model="keyword"
             placeholder="搜索课本、数码、宿舍神器…"
