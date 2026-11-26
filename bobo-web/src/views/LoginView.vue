@@ -45,6 +45,7 @@ import { ElMessage } from 'element-plus'
 import { Lock, User } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { LOGO } from '@/utils/format'
+import { safeRedirect } from '@/utils/navigation'
 
 const route = useRoute()
 const router = useRouter()
@@ -63,7 +64,7 @@ async function submit() {
   try {
     const user = await userStore.login({ ...form })
     ElMessage.success(`欢迎回来，${user.nickname}`)
-    router.replace(route.query.redirect ? String(route.query.redirect) : '/')
+    router.replace(safeRedirect(route.query.redirect, '/'))
   } catch (e) {
     // 提示由 http.js 处理
   } finally {

@@ -55,6 +55,7 @@ import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { safeRedirect } from '@/utils/navigation'
 
 /**
  * 后台登录独立于前台登录页：入口分开，避免普通用户误入后台表单。
@@ -95,8 +96,7 @@ async function submit() {
       return
     }
     ElMessage.success('登录成功')
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
-    router.replace(redirect || '/admin/dashboard')
+    router.replace(safeRedirect(route.query.redirect, '/admin/dashboard'))
   } catch (e) {
     // 登录失败提示由 http.js 统一弹出
   } finally {

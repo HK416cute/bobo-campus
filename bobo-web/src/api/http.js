@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { withBase } from '@/utils/format'
+import { currentAppPath } from '@/utils/navigation'
 
 /**
  * 统一 HTTP 客户端。
@@ -87,8 +88,9 @@ function handleUnauthorized(msg) {
     callback: () => {
       redirecting = false
       // 必须用 withBase 跳转：站点部署在子路径下时，
-      // 直接写 window.location.href = '/login' 会跳出站点前缀（落到站点根的 404）
-      const redirect = encodeURIComponent(window.location.pathname + window.location.search)
+      // 直接写 window.location.href = '/login' 会跳出站点前缀（落到站点根的 404）。
+      // redirect 必须去掉站点 base：否则登录后 router 会再拼一次 base，变成 double-base 404。
+      const redirect = encodeURIComponent(currentAppPath())
       window.location.href = withBase(`/login?redirect=${redirect}`)
     }
   }).catch(() => {
