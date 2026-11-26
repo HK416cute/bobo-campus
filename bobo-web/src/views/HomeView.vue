@@ -6,19 +6,6 @@
         <div class="hero-text">
           <h1>同校闲置，当面交易更放心</h1>
           <p>发布闲置只要 30 秒，支持当面验货与邮寄，全程站内留痕</p>
-          <div class="hero-search">
-            <el-input
-              v-model="keyword"
-              size="large"
-              placeholder="搜一搜：考研资料 / 蓝牙耳机 / 宿舍小冰箱"
-              clearable
-              @keyup.enter="goSearch()"
-            >
-              <template #append>
-                <el-button type="primary" :icon="Search" @click="goSearch()">搜索</el-button>
-              </template>
-            </el-input>
-          </div>
           <div class="hot-words">
             <span>热门：</span>
             <a v-for="word in hotWords" :key="word" @click="goSearch(word)">{{ word }}</a>
@@ -97,7 +84,6 @@
 <script setup>
 import { computed, onActivated, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Search } from '@element-plus/icons-vue'
 import { categoryApi, itemApi, noticeApi, searchApi } from '@/api'
 import ItemCard from '@/components/ItemCard.vue'
 import SkeletonGrid from '@/components/SkeletonGrid.vue'
@@ -214,7 +200,7 @@ function changeSort(sortBy) {
 }
 
 function goSearch(word) {
-  const text = word || keyword.value.trim()
+  const text = (word || '').trim()
   router.push({ path: '/search', query: text ? { keyword: text } : {} })
 }
 </script>
@@ -245,19 +231,6 @@ function goSearch(word) {
   margin: 0 0 16px;
   color: #6b5a1f;
   font-size: 14px;
-}
-
-.hero-search {
-  max-width: 520px;
-}
-
-.hero-search :deep(.el-input__wrapper) {
-  border-radius: 999px 0 0 999px;
-}
-
-.hero-search :deep(.el-input-group__append) {
-  border-radius: 0 999px 999px 0;
-  overflow: hidden;
 }
 
 .hot-words {
