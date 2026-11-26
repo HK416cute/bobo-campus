@@ -44,7 +44,6 @@
       </el-form>
 
       <div class="login-foot">
-        <span class="bobo-muted">演示账号：admin / password</span>
         <el-link type="primary" :underline="false" @click="router.push('/')">返回前台</el-link>
       </div>
     </div>
@@ -162,7 +161,7 @@ async function submit() {
 .login-foot {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   margin-top: 18px;
   padding-top: 14px;
   border-top: 1px dashed var(--bobo-border);

@@ -7,7 +7,9 @@ import com.bobo.domain.query.ItemQuery;
 import com.bobo.domain.vo.ItemCardVO;
 import com.bobo.domain.vo.ItemDetailVO;
 import com.bobo.security.Anonymous;
+import com.bobo.security.AuthContext;
 import com.bobo.service.FavoriteService;
+import com.bobo.service.HotWordService;
 import com.bobo.service.ItemService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -37,11 +39,17 @@ public class ItemController {
 
     private final ItemService itemService;
     private final FavoriteService favoriteService;
+    private final HotWordService hotWordService;
 
     @Anonymous
     @Operation(summary = "商品列表 / 搜索")
     @GetMapping
     public Result<PageResult<ItemCardVO>> page(ItemQuery query) {
+        // 只记录第一页、非管理员、非空关键词；翻页不重复计数，避免热门词被刷榜。
+        // 写日志失败不会影响搜索（HotWordService 内部吞掉异常）。
+        if (query.safePageNum() == 1 && !AuthContext.isAdmin()) {
+            hotWordService.record(query.getKeyword(), "search");
+        }
         return Result.ok(itemService.page(query));
     }
 

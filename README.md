@@ -163,6 +163,7 @@ mysql -h127.0.0.1 -uroot -p bobo < ../mysql/init/02-seed.sql
 mysql -h127.0.0.1 -uroot -p bobo < ../mysql/init/03-ai.sql
 mysql -h127.0.0.1 -uroot -p bobo < ../mysql/init/05-ai-setting.sql
 mysql -h127.0.0.1 -uroot -p bobo < ../mysql/init/06-ai-upgrade.sql   # 技术升级表 + 知识库种子
+mysql -h127.0.0.1 -uroot -p bobo < ../mysql/init/07-search-log.sql    # 动态热门搜索日志表
 # 可选：仅当使用 demo seed 时再导入 AI 演示流水
 # mysql -h127.0.0.1 -uroot -p bobo < ../mysql/demo/04-seed-ai-demo.sql
 # 2) 用环境变量覆盖默认数据源（默认值是 localhost:3306/bobo，账号 bobo/bobo123456）

@@ -98,7 +98,7 @@
 import { computed, onActivated, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Search } from '@element-plus/icons-vue'
-import { categoryApi, itemApi, noticeApi } from '@/api'
+import { categoryApi, itemApi, noticeApi, searchApi } from '@/api'
 import ItemCard from '@/components/ItemCard.vue'
 import SkeletonGrid from '@/components/SkeletonGrid.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -108,7 +108,8 @@ defineOptions({ name: 'HomeView' })
 
 const router = useRouter()
 
-const hotWords = ['考研资料', '蓝牙耳机', '宿舍小冰箱', '山地车', '机械键盘']
+/** 默认词兜底；接口返回真实搜索统计后替换（最近 30 天） */
+const hotWords = ref(['考研资料', '蓝牙耳机', '宿舍小冰箱', '山地车', '机械键盘'])
 const sortOptions = [
   { label: '最新', value: 'new' },
   { label: '最想要', value: 'want' },
@@ -137,7 +138,7 @@ const currentCategoryName = computed(
 )
 
 onMounted(async () => {
-  await Promise.all([loadCategories(), loadNotices()])
+  await Promise.all([loadCategories(), loadNotices(), loadHotWords()])
   await loadItems(true)
 })
 
@@ -161,6 +162,17 @@ async function loadNotices() {
     notices.value = await noticeApi.broadcast(2)
   } catch (e) {
     notices.value = []
+  }
+}
+
+async function loadHotWords() {
+  try {
+    const words = await searchApi.hotWords(8)
+    if (Array.isArray(words) && words.length) {
+      hotWords.value = words
+    }
+  } catch (e) {
+    // 接口不可用时保留静态默认词，不影响首页
   }
 }
 

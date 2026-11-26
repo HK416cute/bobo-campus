@@ -43,6 +43,7 @@
 |---|---|---|---|
 | GET | `/api/items` | 商品分页。query: `keyword, categoryId, status, minPrice, maxPrice, campus, conditionLevel, tradeType, sortBy, onlyFavorite, sellerId, excludeSellerId, pageNum, pageSize`。<br>`sortBy`: `new`(默认) / `priceAsc` / `priceDesc` / `want` / `hot`。<br>前台只传 `status=1`；**后台管理不传 status 表示全部** | 匿名（带 token 时返回 `favorited`） |
 | GET | `/api/items/{itemId}` | 商品详情（含图片列表、卖家信息、卖家其他在售商品），同时浏览量 +1 | 匿名 |
+| GET | `/api/search/hot-words` | 首页热门搜索词。query `limit`（默认 8，服务端限制 1~10）。数据来自最近 30 天真实搜索日志，不足时用默认词补齐；表未初始化时回退默认词 | 匿名 |
 | POST | `/api/items` | 发布商品。body: `ItemDTO`，发布后状态为「待审核」。可选 `aiEstimateId`：卖家采用 AI 估价时传入，服务端校验归属后写入 `ai_*` 字段 | 登录 |
 | PUT | `/api/items/{itemId}` | 编辑商品（仅本人，且状态非「已售」）；编辑后重新进入待审核。同样支持 `aiEstimateId` | 登录 |
 | DELETE | `/api/items/{itemId}` | 删除商品（仅本人或管理员，逻辑删除，同时清理收藏与图片） | 登录 |

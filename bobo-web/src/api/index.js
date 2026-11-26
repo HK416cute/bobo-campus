@@ -123,6 +123,12 @@ export const reportApi = {
   mine: (params) => request.get('/api/reports/my', params)
 }
 
+// ------------------------------------------------------------------ 热门搜索
+export const searchApi = {
+  /** 最近 30 天真实搜索统计；无数据时后端回退到默认词 */
+  hotWords: (limit = 8) => request.get('/api/search/hot-words', { limit })
+}
+
 // ------------------------------------------------------------------ AI 能力
 export const aiApi = {
   /** AI 是否可用（未配置 key 时 available=false，前端隐藏或禁用入口） */

@@ -99,6 +99,8 @@ docker compose exec -T bobo-mysql mysql -ubobo -p"$PW" --default-character-set=u
 # 技术升级：智能定价 / 撮合 / 知识库表 + 种子文档（幂等，可重复执行）
 docker compose exec -T bobo-mysql mysql -ubobo -p"$PW" --default-character-set=utf8mb4 bobo \
   < mysql/init/06-ai-upgrade.sql
+# 动态热门搜索日志表
+docker compose exec -T bobo-mysql mysql -ubobo -p"$PW" --default-character-set=utf8mb4 bobo < mysql/init/07-search-log.sql
 
 # 2) 重建并重启两个镜像（子路径与配置页都在这一版里）
 docker compose up -d --build --no-deps bobo-server bobo-web
@@ -128,6 +130,7 @@ MySQL 官方镜像只会在**数据目录为空**时执行 `mysql/init/*.sql`，
 | `03-ai.sql` | AI 流水 / 反馈 / 审核 3 张表 |
 | `05-ai-setting.sql` | AI 运行配置单行表（Key 为空） |
 | `06-ai-upgrade.sql` | 撮合 / 定价 / 知识库表、商品与订单扩展字段、3 篇知识库种子文档 |
+| `07-search-log.sql` | 搜索关键词日志表（首页动态热门搜索） |
 
 因此：
 

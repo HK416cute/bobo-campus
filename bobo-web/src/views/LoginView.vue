@@ -34,12 +34,6 @@
         <router-link to="/register">还没有账号？去注册</router-link>
         <router-link to="/admin/login">管理员登录入口</router-link>
       </div>
-
-      <el-alert type="info" :closable="false" class="demo">
-        <template #title>
-          演示账号：<code>admin / password</code>（管理员）、<code>xiaoyu / password</code>（普通用户）
-        </template>
-      </el-alert>
     </div>
   </div>
 </template>
@@ -136,14 +130,4 @@ h1 {
   color: var(--bobo-text-regular);
 }
 
-.demo {
-  margin-top: 20px;
-  border-radius: var(--bobo-radius);
-}
-
-.demo code {
-  background: rgba(31, 33, 41, 0.06);
-  padding: 1px 4px;
-  border-radius: 4px;
-}
 </style>
